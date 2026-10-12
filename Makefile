@@ -23,3 +23,9 @@ pytest:
 	uv run pytest ./tests
 mypy:
 	uv run mypy .
+
+## Git checks
+pre-commit:
+	uv run pre-commit run --all-files
+pre-commit-setup:
+	uv run pre-commit install
