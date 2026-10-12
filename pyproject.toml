@@ -35,6 +35,7 @@ target-version = "py314"
 select = ["E", "F", "I", "UP", "B"]   # pycodestyle, pyflakes, isort, pyupgrade, bugbear
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-ra"
 
@@ -42,3 +43,6 @@ addopts = "-ra"
 strict = true
 python_version = "3.14"
 files = ["src", "tests"]
+
+[tool.uv]
+package = false  # an app, not installable

@@ -1,0 +1,13 @@
+services: 
+  harnessd:
+    build: .
+    ports:
+      - "5999:5999"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5999/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+volumes:
+  redis-data:
