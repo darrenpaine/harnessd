@@ -21,6 +21,8 @@ format:
 	uv run ruff format .
 pytest:
 	uv run pytest ./tests
+coverage:
+	uv run pytest --cov=src ./tests
 mypy:
 	uv run mypy .
 
