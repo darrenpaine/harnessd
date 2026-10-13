@@ -1,6 +1,7 @@
 # harnessd
 
 A base for AI agent usage, with an example Python/FastAPI code project.
+![CI Status](https://github.com/darrenpaine/harnessd/actions/workflows/ci.yaml/badge.svg)   
 
 ## Development
 
