@@ -14,4 +14,4 @@ RUN uv sync --frozen --no-dev
 
 COPY src/ ./
 
-CMD ["uvicorn", "harnessd.app:app", "--host", "0.0.0.0", "--port", "5999"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "5999"]
