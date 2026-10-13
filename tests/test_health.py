@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from harnessd.app import app
+from app import app
 
 client = TestClient(app)
 
