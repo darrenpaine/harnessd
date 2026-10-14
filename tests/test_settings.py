@@ -1,4 +1,4 @@
-"""Settings and model provider selection (SPEC-0001 B-0006)."""
+"""Settings and model provider selection (SPEC-0001 B-0001)."""
 
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-@pytest.mark.spec("SPEC-0001", "B-0006", "AT-0009")
+@pytest.mark.spec("SPEC-0001", "B-0001", "AT-0001")
 @pytest.mark.parametrize(
     ("values", "expected"),
     [
@@ -62,14 +62,14 @@ def test_provider_selection(
     assert isinstance(model, expected)
 
 
-@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0001", "B-0001")
 @pytest.mark.parametrize("provider", ["anthropic", "google"])
 def test_hosted_provider_requires_key(provider: str) -> None:
     with pytest.raises(ValidationError, match="API_KEY is required"):
         _settings(llm_provider=provider, llm_model="m")
 
 
-@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0001", "B-0001")
 def test_empty_key_counts_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
@@ -77,13 +77,14 @@ def test_empty_key_counts_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         _settings()
 
 
-@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0001", "B-0001")
 def test_unknown_provider_rejected() -> None:
     with pytest.raises(ValidationError):
         _settings(llm_provider="openai")
 
 
-@pytest.mark.spec("SPEC-0001", "B-0004", "B-0008")
+@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0004", "B-0003")
 def test_defaults() -> None:
     s = _settings()
     assert s.llm_provider == "ollama"
@@ -92,7 +93,7 @@ def test_defaults() -> None:
     assert s.notes_path == Path("data/notes.txt")
 
 
-@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0001", "B-0001")
 def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
@@ -104,7 +105,8 @@ def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "secret" not in repr(s)
 
 
-@pytest.mark.spec("SPEC-0001", "B-0004", "B-0008")
+@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0004", "B-0003")
 @pytest.mark.parametrize("field", ["run_timeout_seconds", "checkpoint_ttl_hours"])
 def test_durations_must_be_positive(field: str) -> None:
     with pytest.raises(ValidationError):
@@ -120,7 +122,7 @@ def test_get_settings_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
         get_settings.cache_clear()
 
 
-@pytest.mark.spec("SPEC-0001", "B-0006")
+@pytest.mark.spec("SPEC-0001", "B-0001")
 def test_build_chat_model_rejects_missing_key() -> None:
     unchecked = Settings.model_construct(llm_provider="anthropic", llm_model="m")
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is not set"):

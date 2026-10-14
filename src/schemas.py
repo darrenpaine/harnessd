@@ -1,4 +1,4 @@
-"""Pydantic models for the API and tool I/O (SPEC-0001)."""
+"""Pydantic models for the API (SPEC-0002) and tool I/O (SPEC-0003)."""
 
 from typing import Annotated, Literal, Self
 from uuid import UUID
@@ -29,7 +29,7 @@ ToolErrorCode = Literal[
 
 
 class ToolError(_Model):
-    """Structured tool failure returned to the model (B-0003)."""
+    """Structured tool failure returned to the model (SPEC-0003 B-0001)."""
 
     code: ToolErrorCode
     message: str
@@ -109,7 +109,7 @@ ToolCallRecord = Annotated[
 
 
 class PendingAction(_Model):
-    """A side-effecting tool call waiting for human confirmation (B-0007)."""
+    """A side-effecting tool call waiting for human confirmation (SPEC-0001 B-0005)."""
 
     tool: Literal["add_note"] = "add_note"
     input: AddNoteInput
