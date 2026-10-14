@@ -6,7 +6,7 @@
 - AI coding base using Claude.
 - FastAPI service exposing a single LangGraph agent (with 3 tools) that returns
 validated, structured responses. Conversation state is checkpointed in Redis.
-- Specs live in `docs/specs/`; the current one is `docs/specs/0001-agent-core.md`.
+- Specs live in `docs/specs/`; see the [spec index](docs/specs/README.md).
 
 ## Development
 
