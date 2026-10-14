@@ -1,6 +1,6 @@
 # SPEC-0007: API documentation
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 
