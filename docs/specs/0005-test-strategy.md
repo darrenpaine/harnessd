@@ -1,6 +1,6 @@
 # SPEC-0005: Test strategy
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 

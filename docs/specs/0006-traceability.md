@@ -1,6 +1,6 @@
 # SPEC-0006: Traceability
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 

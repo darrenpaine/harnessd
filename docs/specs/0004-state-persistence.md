@@ -1,6 +1,6 @@
 # SPEC-0004: State and persistence
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 
