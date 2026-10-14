@@ -41,6 +41,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py314"
+src = [".", "src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]   # pycodestyle, pyflakes, isort, pyupgrade, bugbear
@@ -51,7 +52,10 @@ testpaths = ["tests"]
 addopts = "-ra"
 markers = [
     "spec(spec_id, *ids): link a test to spec behaviors, e.g. spec(\"SPEC-0001\", \"B-0002\")",
+    "redis: needs a real Redis (skips locally if unreachable, fails in CI)",
 ]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 strict = true
