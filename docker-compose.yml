@@ -1,13 +1,35 @@
-services: 
+services:
+  redis:
+    # Redis 8+ includes the JSON and search modules the checkpointer needs.
+    image: redis:8.2
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-data:/data
+
   harnessd:
     build: .
     ports:
       - "5999:5999"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5999/health', timeout=2)"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 15s
+
 volumes:
   redis-data:

@@ -3,6 +3,8 @@
 ## Running in Docker
 up:
 	sudo docker compose up -d
+redis:
+	sudo docker compose up -d redis
 down:
 	sudo docker compose down
 build:
