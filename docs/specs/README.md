@@ -11,3 +11,4 @@ SPEC-0006.
 | SPEC-0004 | State and persistence | reviewed | [0004-state-persistence.md](0004-state-persistence.md) |
 | SPEC-0005 | Test strategy | reviewed | [0005-test-strategy.md](0005-test-strategy.md) |
 | SPEC-0006 | Traceability | reviewed | [0006-traceability.md](0006-traceability.md) |
+| SPEC-0007 | API documentation | draft | [0007-api-docs.md](0007-api-docs.md) |
