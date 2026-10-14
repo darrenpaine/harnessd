@@ -10,3 +10,5 @@ bin/
 dist/
 
 .coverage
+.env
+data/
