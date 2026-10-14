@@ -1,4 +1,4 @@
-"""Build the tool-calling chat model chosen by settings (B-0006)."""
+"""Build the tool-calling chat model chosen by settings (SPEC-0001 B-0001)."""
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel

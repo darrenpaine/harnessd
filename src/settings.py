@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         env_file=".env", env_ignore_empty=True, extra="ignore"
     )
 
-    # Model (B-0006)
+    # Model (SPEC-0001 B-0001)
     llm_provider: LLMProvider = "ollama"
     llm_model: str = "llama3.1"
     ollama_base_url: str = "http://localhost:11434"
@@ -28,8 +28,8 @@ class Settings(BaseSettings):
 
     # Runtime
     redis_url: str = "redis://localhost:6379"
-    run_timeout_seconds: float = Field(default=60, gt=0)  # B-0008
-    checkpoint_ttl_hours: float = Field(default=24, gt=0)  # B-0004
+    run_timeout_seconds: float = Field(default=60, gt=0)  # SPEC-0001 B-0006
+    checkpoint_ttl_hours: float = Field(default=24, gt=0)  # SPEC-0004 B-0003
 
     @model_validator(mode="after")
     def _provider_key_present(self) -> Self:
