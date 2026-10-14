@@ -40,6 +40,9 @@ select = ["E", "F", "I", "UP", "B"]   # pycodestyle, pyflakes, isort, pyupgrade,
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "spec(spec_id, *ids): link a test to spec behaviors, e.g. spec(\"SPEC-0001\", \"B-0002\")",
+]
 
 [tool.mypy]
 strict = true
