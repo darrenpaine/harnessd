@@ -1,6 +1,6 @@
 # SPEC-0001: Agent core
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 

@@ -1,6 +1,6 @@
 # SPEC-0003: Tool contract
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 

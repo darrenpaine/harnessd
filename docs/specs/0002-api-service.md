@@ -1,6 +1,6 @@
 # SPEC-0002: API service
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: none yet
 
