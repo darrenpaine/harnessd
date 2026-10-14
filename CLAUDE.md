@@ -1,0 +1,73 @@
+# CLAUDE.md
+
+## Project
+A FastAPI service exposing a single LangGraph agent (with 3 tools) that returns
+validated, structured responses. Conversation state is checkpointed in Redis.
+Specs live in `docs/specs/`; the current one is `docs/specs/0001-agent-core.md`.
+
+## Stack
+- Python 3.14, managed with `uv` (use `uv add` / `uv sync`, never bare pip)
+- FastAPI + Uvicorn
+- LangGraph (agent graph) with a Redis checkpointer
+- Pydantic v2 for every boundary: API request/response and tool I/O
+- pytest (+ pytest-asyncio + coverage), Ruff (lint + format), mypy (type check)
+- Docker / docker compose (app + Redis), GitHub Actions CI
+
+## Commands
+Run these before saying a task is done.
+
+| Task           | Command                                                    |
+|----------------|------------------------------------------------------------|
+| Install        | `uv sync`                                                  |
+| Run (local)    | `docker compose up -d` (app + Redis)                       |
+| Run (dev)      | `uv run uvicorn src.app:app --reload --port 5999` |
+| Tests/Coverage | `uv run pytest --cov=src ./`                               |
+| One test       | `uv run pytest tests/path.py::test_name`                   |
+| Lint           | `uv run ruff check .`                                      |
+| Format         | `uv run ruff format .`                                     |
+| Types          | `uv run mypy src/ tests/`                                  |
+
+CI runs lint, types, and tests on every push. Keep all three green. Check this locally using: `uv run pre-commit run --all-files`
+
+## Workflow: spec before code
+1. Before writing or changing behavior, read the relevant file in `docs/specs/`.
+2. If the behavior is not in a spec, or the spec is wrong, update the spec
+   first and ask me to review it. Do not code against an unreviewed spec.
+3. Define or update Pydantic models in `src/schemas.py` before the logic that uses them.
+4. Write the acceptance tests listed in the spec, then implement until they pass.
+5. Reference spec ids in tests (e.g. `@pytest.mark.spec("SPEC-0001", "B-0002")`) so
+   requirements stay traceable to tests.
+
+## Layout
+```
+src/
+  app.py           # FastAPI app and routes
+  schemas.py       # Pydantic models (API + tool I/O)
+  agent/           # LangGraph graph, state, checkpointer
+  tools/           # one module per tool, each with typed input/output
+docs/
+  design/          # how it is built: components, data flow, trade-offs
+  requirements/    # what the system must do (R-nnnn statements)
+  specs/           # per-feature contract: goal, I/O, behavior, acceptance 
+tests/
+Dockerfile
+docker-compose.yml
+pyproject.toml
+uv.lock            # UV sync file
+```
+
+## Conventions
+- Type annotation hints everywhere - in src and tests; no untyped functions or parameters.
+- Tools take and return Pydantic models. A tool failure returns a structured
+  error to the model; it never raises into the graph.
+- No real LLM calls in tests. Use a fake or scripted model so CI is deterministic.
+- Use dependency injection to insert graph object in FastAPI call handlers.
+- Tests that need Redis use the compose service or a fixture, not mocks of the checkpointer.
+- Config comes from environment variables via a single settings class. Never
+  commit secrets; `.env` is gitignored, `.env.example` is committed.
+- Small commits with imperative messages, one concern each.
+- Commit comments should be concise, simple language. Do not add 'co-author'.
+- Ask me before adding dependencies.
+
+## Non-goals (for now)
+Auth, streaming, multi-agent routing, a UI, production deployment.
