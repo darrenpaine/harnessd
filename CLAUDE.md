@@ -46,6 +46,7 @@ CI runs lint, types, and tests on every push. Keep all three green. Check this l
 - Before opening a PR, run `uv run pre-commit run --all-files` and the full test suite.
 - Push with `git push -u origin <branch>` and open a PR to `main` with `gh pr create`.
   The PR description lists the spec ids it covers (e.g. SPEC-0001 B-0004, AT-0006).
+  Do not add a "Generated with Claude Code" line or any other Claude attribution.
 - Merge only after CI is green and I've approved. I merge; don't merge your own PR
   unless I ask. Delete the branch after merge.
 
