@@ -22,6 +22,7 @@ Run these before saying a task is done.
 |----------------|------------------------------------------------------------|
 | Install        | `uv sync`                                                  |
 | Run (local)    | `docker compose up -d` (app + Redis)                       |
+| Redis only     | `docker compose up -d redis` (needed by `redis` tests)     |
 | Run (dev)      | `uv run uvicorn src.app:app --reload --port 5999` |
 | Tests/Coverage | `uv run pytest --cov=src ./`                               |
 | One test       | `uv run pytest tests/path.py::test_name`                   |

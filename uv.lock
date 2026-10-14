@@ -563,6 +563,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-redis" },
     { name = "pydantic-settings" },
+    { name = "redis" },
     { name = "tavily-python" },
     { name = "uvicorn" },
 ]
@@ -588,6 +589,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.15" },
     { name = "langgraph-checkpoint-redis", specifier = ">=0.5.2" },
     { name = "pydantic-settings", specifier = ">=2.16.0" },
+    { name = "redis", specifier = ">=8.1.0" },
     { name = "tavily-python", specifier = ">=0.8.5" },
     { name = "uvicorn", specifier = ">=0.54.0" },
 ]
