@@ -43,6 +43,8 @@ AgentResponse
 The compiled graph is injected into handlers with a FastAPI dependency, so tests can
 override it.
 
+Swagger UI, ReDoc and the OpenAPI schema are specified in SPEC-0007.
+
 ## Behavior
 - B-0001: Invalid requests return 422 and make no LLM call.
 - B-0002: Every 200 response validates against AgentResponse; fields that don't match
