@@ -9,6 +9,14 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "langchain-anthropic>=1.7.6",
+    "langchain-google-genai>=4.4.2",
+    "langchain-ollama>=1.1.0",
+    "langgraph>=1.2.15",
+    "langgraph-checkpoint-redis>=0.5.2",
+    "pydantic-settings>=2.16.0",
+    "tavily-python>=0.8.5",
     "uvicorn>=0.54.0",
 ]
 
@@ -25,6 +33,7 @@ dev = [
     "mypy>=2.4.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.0",
 ]
