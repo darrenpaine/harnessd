@@ -14,7 +14,7 @@ logs:
 
 ## Working locally
 run:
-	uv run uvicorn src.app:app --reload --port 5999
+	uv run uvicorn app:app --app-dir src --reload --port 5999
 lint:
 	uv run ruff check .
 fix:
@@ -26,7 +26,9 @@ pytest:
 coverage:
 	uv run pytest --cov=src ./tests
 mypy:
-	uv run mypy src/ tests/
+	uv run mypy src/ tests/ scripts/
+openapi:
+	uv run python scripts/export_openapi.py
 
 ## Git checks
 pre-commit:
