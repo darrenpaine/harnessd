@@ -1,7 +1,7 @@
 """Redis checkpointing, checkpoint TTL and the per-thread run lock (SPEC-0004)."""
 
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
 from langgraph.checkpoint.redis.ashallow import AsyncShallowRedisSaver
@@ -78,3 +78,17 @@ async def thread_lock(
             await lock.release()
         except LockError:
             pass  # already expired; nothing to release
+
+
+class RedisThreadGuard:
+    """Thread lock and TTL refresh in Redis, shared by all workers."""
+
+    def __init__(self, redis: Redis, settings: Settings) -> None:
+        self.redis = redis
+        self.settings = settings
+
+    def hold(self, thread_id: str) -> AbstractAsyncContextManager[None]:
+        return thread_lock(self.redis, thread_id, self.settings)
+
+    async def touch(self, thread_id: str) -> None:
+        await refresh_thread_ttl(self.redis, thread_id, ttl_seconds(self.settings))
