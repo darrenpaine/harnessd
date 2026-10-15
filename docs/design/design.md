@@ -156,8 +156,10 @@ to every key containing the thread id (a UUID) after each run.
 **Files**:
 - Notes: `NOTES_PATH` (default `data/notes.txt`), one
   `YYYY-MM-DDTHH:MM:SSZ<TAB>text` line per note.
+- Notes under docker compose: `NOTES_DIR` (default `data/notes`), mounted at
+  `/srv/data/notes` in the app container.
 - Local Redis data: `REDIS_DATA_DIR` (default `data/redis`).
-- Both live under the gitignored `data/` by default.
+- All of these live under the gitignored `data/` by default.
 
 ### Failure modes
 | What goes wrong | Response | Spec |
