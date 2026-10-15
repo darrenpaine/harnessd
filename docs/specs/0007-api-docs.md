@@ -1,6 +1,6 @@
 # SPEC-0007: API documentation
 
-Status: reviewed
+Status: draft
 Requirements: none yet
 Design: [design.md](../design/design.md)
 
@@ -29,10 +29,10 @@ internet access.
 ### Operations
 | Endpoint | Tag | operationId | Responses documented |
 |----------|-----|-------------|----------------------|
-| `POST /v1/agent/run` | agent | `run_agent` | 200 AgentResponse, 409 ApiError, 422 HTTPValidationError, 503 ApiError |
+| `POST /v1/agent/run` | agent | `run_agent` | 200 AgentResponse, 409 ApiError, 422 HTTPValidationError, 500 ApiError, 503 ApiError |
 | `GET /health` | health | `health_check` | 200 `{"status": "ok"}` |
 
-ApiError is the 409/503 body from SPEC-0002, as a named model:
+ApiError is the 409/500/503 body from SPEC-0002, as a named model:
 `{"error": {"code": str, "message": str}}`.
 
 ### Committed schema
@@ -63,7 +63,7 @@ ApiError is the 409/503 body from SPEC-0002, as a named model:
   description. -> `tests/test_api_docs.py::test_schema_metadata`
 - AT-0003 (B-0003): Every operation has a summary, description, one tag and the
   expected unique operationId. -> `tests/test_api_docs.py::test_operations_documented`
-- AT-0004 (B-0004): `run_agent` declares 200/409/422/503 with the right schemas;
+- AT-0004 (B-0004): `run_agent` declares 200/409/422/500/503 with the right schemas;
   ApiError is in `components.schemas`.
   -> `tests/test_api_docs.py::test_error_responses_documented`
 - AT-0005 (B-0005): Every AgentRequest/AgentResponse field has a description; each
