@@ -10,7 +10,10 @@ contract; where this document and a spec disagree, the spec wins and this docume
 is out of date.
 
 ## Problem and constraints
-A FastAPI service exposes one LangGraph agent. The agent answers a user message,
+Create an example CLAUDE space and demonstrate with a FastAPI service that uses an
+LLM and tools.
+
+The FastAPI service exposes one LangGraph agent. The agent answers a user message,
 calling up to three tools, and every response is a validated, structured
 `AgentResponse`. Conversation state lives in Redis so a thread can be continued, or
 resumed after a human confirms a side effect.
@@ -29,6 +32,9 @@ Constraints:
 - **Non-goals**: auth, streaming, multi-agent routing, a UI, production deployment.
 
 ## Proposed approach
+Starting with a basic version, develop and update the CLAUDE.md and other associated
+files as the project progresses. Add on to these as new rules are needed.
+
 FastAPI handles HTTP and validation. Each request goes to an agent runner that takes
 a per-thread lock in Redis, runs the LangGraph graph against a Redis checkpointer
 under a time limit, then refreshes the thread's TTL. The graph alternates between
