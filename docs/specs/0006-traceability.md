@@ -2,7 +2,7 @@
 
 Status: reviewed
 Requirements: none yet
-Design: none yet
+Design: [design.md](../design/design.md)
 
 ## Goal
 Every requirement can be followed to the spec behaviors that meet it and the tests

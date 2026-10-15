@@ -2,7 +2,7 @@
 
 Status: reviewed
 Requirements: none yet
-Design: none yet
+Design: [design.md](../design/design.md)
 
 ## Goal
 How conversation state is identified, saved in Redis, expired and resumed, and how

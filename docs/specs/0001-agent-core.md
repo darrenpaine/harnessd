@@ -2,7 +2,7 @@
 
 Status: reviewed
 Requirements: none yet
-Design: none yet
+Design: [design.md](../design/design.md)
 
 ## Goal
 The LangGraph agent loop. Given a user message and the thread's saved state, it calls

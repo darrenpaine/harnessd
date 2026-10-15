@@ -2,7 +2,7 @@
 
 Status: reviewed
 Requirements: none yet
-Design: none yet
+Design: [design.md](../design/design.md)
 
 ## Goal
 Keep the test suite deterministic, fast and free to run: no real LLM calls, no API
