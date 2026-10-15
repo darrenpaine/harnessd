@@ -1,6 +1,7 @@
 """fetch_site with HTTP and DNS mocked (SPEC-0003 B-0006)."""
 
 import dataclasses
+import ipaddress
 from collections.abc import Callable
 
 import httpx
@@ -17,14 +18,17 @@ DNS = {
     "example.com": ["93.184.215.14"],
     "next.example.com": ["93.184.215.15"],
     "intranet.local": ["10.1.2.3"],
+    "7-zip.org": ["93.184.215.16"],
 }
 
 
 async def fake_resolve(host: str) -> list[str]:
     if host in DNS:
         return DNS[host]
-    if host[0].isdigit() or ":" in host:
-        return [host]  # IP literal
+    try:
+        return [str(ipaddress.ip_address(host))]  # IP literal
+    except ValueError:
+        pass
     raise OSError(f"unknown host {host}")
 
 
@@ -59,6 +63,17 @@ async def test_extracts_visible_text(tool_context: ToolContext) -> None:
     assert isinstance(result, FetchSiteOutput)
     assert result.text == "Docs Hello & welcome"
     assert not result.truncated
+
+
+@pytest.mark.spec("SPEC-0003", "B-0006")
+async def test_host_starting_with_digit(tool_context: ToolContext) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "7-zip.org"
+        return httpx.Response(200, headers={"content-type": "text/plain"}, text="7z")
+
+    result = await _fetch(_ctx(tool_context, handler), "https://7-zip.org/")
+    assert isinstance(result, FetchSiteOutput)
+    assert result.text == "7z"
 
 
 @pytest.mark.spec("SPEC-0003", "B-0006", "AT-0006")
