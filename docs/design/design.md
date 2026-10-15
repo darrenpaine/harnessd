@@ -1,6 +1,6 @@
 # Design: harnessd agent service
 
-Status: draft
+Status: reviewed
 Specs: SPEC-0001 Agent core, SPEC-0002 API service, SPEC-0003 Tool contract,
 SPEC-0004 State and persistence, SPEC-0005 Test strategy, SPEC-0006 Traceability,
 SPEC-0007 API documentation (see [the spec index](../specs/README.md))
