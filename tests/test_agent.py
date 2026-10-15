@@ -8,9 +8,11 @@ import uuid
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from agent.graph import tool_schema
 from agent.persistence import ThreadBusyError
 from agent_support import PAGE_TEXT, Agent, fetch, tool_turn
 from schemas import FetchSiteCall, WebSearchCall
+from tools import TOOLS
 from tools.base import ToolContext
 
 
@@ -210,3 +212,27 @@ async def test_second_run_on_busy_thread_raises(tool_context: ToolContext) -> No
     with pytest.raises(ThreadBusyError):
         await agent.run(thread_id=thread_id, message="two")
     assert (await first).status == "ok"
+
+
+@pytest.mark.spec("SPEC-0001", "B-0001")
+@pytest.mark.parametrize("name", sorted(TOOLS))
+def test_tool_schema_is_portable(name: str) -> None:
+    # Gemini rejects additionalProperties; unknown fields are refused by the
+    # Input model instead (see test_extra_args_are_invalid).
+    schema = tool_schema(TOOLS[name])
+    assert "additionalProperties" not in json.dumps(schema)
+    assert schema["function"]["parameters"]["properties"]
+
+
+@pytest.mark.spec("SPEC-0001", "B-0004")
+async def test_extra_args_are_invalid(tool_context: ToolContext) -> None:
+    extra = tool_turn(("fetch_site", {"url": "https://example.com/", "depth": 2}))
+    agent = Agent(tool_context, [extra, AIMessage(content="ok")])
+
+    response = await agent.run(message="fetch")
+
+    assert response.status == "ok"
+    assert response.tool_calls == []
+    assert agent.fetched == []
+    [result] = agent.tool_results(1)
+    assert error_code(result) == "invalid_input"

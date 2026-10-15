@@ -63,9 +63,26 @@ def tool_schema(tool: Tool[Any, Any]) -> dict[str, Any]:
         "function": {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.input_model.model_json_schema(),
+            "parameters": _portable(tool.input_model.model_json_schema()),
         },
     }
+
+
+def _portable(schema: Any) -> Any:
+    """Drop `additionalProperties`, which Gemini does not accept (SPEC-0001 B-0001).
+
+    Unknown fields are still rejected: every call is checked against the
+    tool's Input model before it runs.
+    """
+    if isinstance(schema, dict):
+        return {
+            key: _portable(value)
+            for key, value in schema.items()
+            if key != "additionalProperties"
+        }
+    if isinstance(schema, list):
+        return [_portable(item) for item in schema]
+    return schema
 
 
 def answer_dangling_calls(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
