@@ -2,7 +2,7 @@
 
 Status: reviewed
 Requirements: none yet
-Design: none yet
+Design: [design.md](../design/design.md)
 
 ## Goal
 One standard shape for every tool the agent can call, so tools are typed, bounded in
