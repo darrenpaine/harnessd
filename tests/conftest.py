@@ -1,8 +1,12 @@
 """Shared fixtures (SPEC-0005)."""
 
+from pathlib import Path
+
 import pytest
 
 import redis_support
+from settings import Settings
+from tools.base import ToolContext
 
 SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "TAVILY_API_KEY")
 
@@ -22,3 +26,15 @@ def redis_url() -> str:
     if problem is not None:
         redis_support.unavailable(problem, redis_support.running_in_ci())
     return url
+
+
+async def public_resolver(host: str) -> list[str]:
+    """Resolve every host to one public address, without real DNS."""
+    return ["93.184.215.14"]
+
+
+@pytest.fixture
+def tool_context(tmp_path: Path) -> ToolContext:
+    """Tool context with a temp notes file, no network and no API keys."""
+    settings = Settings(_env_file=None, notes_path=tmp_path / "notes" / "notes.txt")  # type: ignore[call-arg]
+    return ToolContext(settings=settings, resolve=public_resolver)

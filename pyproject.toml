@@ -63,6 +63,10 @@ strict = true
 python_version = "3.14"
 files = ["src", "tests"]
 
+[[tool.mypy.overrides]]
+module = ["tavily", "tavily.*"]
+ignore_missing_imports = true  # ships no type hints
+
 [tool.uv]
 package = false  # an app, not installable
 

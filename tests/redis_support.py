@@ -24,8 +24,10 @@ def redis_problem(url: str) -> str | None:
     try:
         client.ping()
         loaded = {_module_name(m) for m in client.module_list()}
-    except redis.RedisError as exc:
+    except redis.ConnectionError as exc:
         return f"Redis unreachable at {url}: {exc}"
+    except redis.RedisError as exc:
+        return f"Redis at {url} is not usable: {exc}"
     finally:
         client.close()
     missing = REQUIRED_MODULES - loaded
