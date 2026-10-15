@@ -10,7 +10,7 @@ contract; where this document and a spec disagree, the spec wins and this docume
 is out of date.
 
 ## Problem and constraints
-Create an example CLAUDE space and demonstrate with a FastAPI service that uses an
+Create an example Claude Code workspace and demonstrate with a FastAPI service that uses an
 LLM and tools.
 
 The FastAPI service exposes one LangGraph agent. The agent answers a user message,
