@@ -1,9 +1,13 @@
 """Test doubles shared across the suite (SPEC-0005)."""
 
+import asyncio
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -15,11 +19,13 @@ class ScriptedChatModel(BaseChatModel):
     """Chat model that replays scripted replies in order (SPEC-0005 B-0002).
 
     Every call's input messages are recorded in `calls`. Calling it more times
-    than there are scripted replies fails the test.
+    than there are scripted replies fails the test. `delay` makes async calls
+    wait that many seconds first, for timeout tests.
     """
 
     replies: list[AIMessage]
     calls: list[list[BaseMessage]] = []
+    delay: float = 0
 
     @property
     def _llm_type(self) -> str:
@@ -40,6 +46,16 @@ class ScriptedChatModel(BaseChatModel):
         self.calls.append(list(messages))
         reply = self.replies[len(self.calls) - 1]
         return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        await asyncio.sleep(self.delay)
+        return self._generate(messages, stop, **kwargs)
 
     def bind_tools(
         self,

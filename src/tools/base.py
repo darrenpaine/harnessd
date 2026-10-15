@@ -70,7 +70,7 @@ async def call_tool[InputT: BaseModel, OutputT: BaseModel](
     try:
         data = tool.input_model.model_validate(dict(args))
     except ValidationError as exc:
-        return ToolError(code="invalid_input", message=_summarize(exc))
+        return ToolError(code="invalid_input", message=summarize(exc))
     try:
         async with asyncio.timeout(tool.timeout_seconds):
             return await tool.run(data, ctx)
@@ -87,7 +87,7 @@ async def call_tool[InputT: BaseModel, OutputT: BaseModel](
         )
 
 
-def _summarize(exc: ValidationError) -> str:
+def summarize(exc: ValidationError) -> str:
     return "; ".join(
         f"{'.'.join(str(part) for part in err['loc']) or 'input'}: {err['msg']}"
         for err in exc.errors()

@@ -1,11 +1,11 @@
 """Redis checkpointing, TTL and the thread lock (SPEC-0004).
 
-These use real Redis (SPEC-0005 B-0003). The agent graph isn't built yet, so
-a minimal graph stands in: one node that calls the scripted model, and one
-that pauses for confirmation.
+These use real Redis (SPEC-0005 B-0003). Checkpointer tests use a minimal
+one-node graph; the confirmation test runs the real agent.
 """
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -14,12 +14,11 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Command, interrupt
 from redis.asyncio import Redis
 
 from agent.persistence import (
     LOCK_MARGIN_SECONDS,
+    RedisThreadGuard,
     ThreadBusyError,
     lock_key,
     open_checkpointer,
@@ -27,8 +26,10 @@ from agent.persistence import (
     thread_lock,
     ttl_seconds,
 )
+from agent_support import Agent, note, tool_turn
 from fakes import ScriptedChatModel
 from settings import Settings
+from tools.base import ToolContext
 
 pytestmark = pytest.mark.redis
 
@@ -53,18 +54,6 @@ def chat_graph(model: ScriptedChatModel, saver: BaseCheckpointSaver[Any]) -> Any
     graph.add_node("model", call_model)
     graph.add_edge(START, "model")
     graph.add_edge("model", END)
-    return graph.compile(checkpointer=saver)
-
-
-def confirm_graph(saver: BaseCheckpointSaver[Any]) -> CompiledStateGraph[Any]:
-    def ask(state: MessagesState) -> dict[str, list[BaseMessage]]:
-        approved = interrupt({"tool": "add_note"})
-        return {"messages": [AIMessage(content=f"approved={approved}")]}
-
-    graph = StateGraph(MessagesState)
-    graph.add_node("ask", ask)
-    graph.add_edge(START, "ask")
-    graph.add_edge("ask", END)
     return graph.compile(checkpointer=saver)
 
 
@@ -125,19 +114,30 @@ async def test_checkpoint_ttl_set(settings: Settings, redis: Redis) -> None:
 
 
 @pytest.mark.spec("SPEC-0004", "B-0004", "AT-0004")
-async def test_pending_confirmation_survives_restart(settings: Settings) -> None:
-    thread_id = str(uuid.uuid4())
-    async with open_checkpointer(settings) as saver:
-        paused = await confirm_graph(saver).ainvoke(
-            {"messages": [("user", "note")]}, config(thread_id)
-        )
-    assert "__interrupt__" in paused
+async def test_pending_confirmation_survives_restart(
+    settings: Settings, redis: Redis, tool_context: ToolContext
+) -> None:
+    agent_settings = tool_context.settings.model_copy(
+        update={"redis_url": settings.redis_url}
+    )
+    ctx = dataclasses.replace(tool_context, settings=agent_settings)
+    guard = RedisThreadGuard(redis, ctx.settings)
+    async with open_checkpointer(ctx.settings) as saver:
+        agent = Agent(ctx, [tool_turn(note("kept"))], checkpointer=saver, guard=guard)
+        paused = await agent.run(message="note: kept")
+    assert paused.status == "awaiting_confirmation"
+    assert await thread_ttls(redis, str(paused.thread_id))
 
-    async with open_checkpointer(settings) as saver:
-        done = await confirm_graph(saver).ainvoke(
-            Command(resume=True), config(thread_id)
-        )
-    assert done["messages"][-1].content == "approved=True"
+    # A new checkpointer and graph, as after an app restart.
+    async with open_checkpointer(ctx.settings) as saver:
+        replies = [AIMessage(content="noted")]
+        agent = Agent(ctx, replies, checkpointer=saver, guard=guard)
+        done = await agent.run(thread_id=paused.thread_id, confirm=True)
+
+    assert done.status == "ok"
+    assert [r.name for r in done.tool_calls] == ["add_note"]
+    assert ctx.settings.notes_path.read_text().endswith("\tkept\n")
+    assert not await redis.exists(lock_key(str(paused.thread_id)))
 
 
 @pytest.mark.spec("SPEC-0004", "B-0005", "AT-0005")
