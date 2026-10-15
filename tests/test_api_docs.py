@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from app import app
 from export_openapi import OUTPUT, render
-from schemas import AgentRequest, AgentResponse
+from schemas import REQUEST_EXAMPLES, AgentRequest, AgentResponse
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -93,6 +93,19 @@ def test_model_examples_validate(model: type[BaseModel]) -> None:
     else:
         assert any("message" in e for e in examples)
         assert any("confirm" in e for e in examples)
+
+
+@pytest.mark.spec("SPEC-0007", "B-0005", "AT-0005")
+def test_request_examples_offered() -> None:
+    body = schema()["paths"]["/v1/agent/run"]["post"]["requestBody"]
+    offered = body["content"]["application/json"]["examples"]
+    assert set(offered) == {"new", "continue", "confirm"}
+    for example in offered.values():
+        assert example["summary"]
+        AgentRequest.model_validate(example["value"])
+    assert "thread_id" not in offered["new"]["value"]
+    assert {"thread_id", "message"} <= set(offered["continue"]["value"])
+    assert REQUEST_EXAMPLES.keys() == offered.keys()
 
 
 @pytest.mark.spec("SPEC-0007", "B-0006", "AT-0006")

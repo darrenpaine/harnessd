@@ -90,6 +90,10 @@
             "message": "What is new in Python 3.14?"
           },
           {
+            "message": "And what changed in 3.13?",
+            "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
+          },
+          {
             "confirm": true,
             "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
           }
@@ -689,6 +693,32 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "examples": {
+                "confirm": {
+                  "description": "Answer an awaiting_confirmation response: true runs the action, false rejects it.",
+                  "summary": "Confirm a pending action",
+                  "value": {
+                    "confirm": true,
+                    "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
+                  }
+                },
+                "continue": {
+                  "description": "Send the thread_id from an earlier response.",
+                  "summary": "Continue a thread",
+                  "value": {
+                    "message": "And what changed in 3.13?",
+                    "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
+                  }
+                },
+                "new": {
+                  "description": "No thread_id: a new thread starts. Keep the thread_id from the response to continue it.",
+                  "summary": "New conversation",
+                  "value": {
+                    "max_tool_calls": 5,
+                    "message": "What is new in Python 3.14?"
+                  }
+                }
+              },
               "schema": {
                 "$ref": "#/components/schemas/AgentRequest"
               }

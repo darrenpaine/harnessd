@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 import httpx
 import redis.exceptions
-from fastapi import Depends, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langchain_core.exceptions import ModelConnectionError
@@ -22,6 +22,7 @@ from agent.llm import build_chat_model
 from agent.persistence import RedisThreadGuard, ThreadBusyError, open_checkpointer
 from agent.runner import AgentRunner, ConfirmationStateError, ThreadGuard
 from schemas import (
+    REQUEST_EXAMPLES,
     AgentRequest,
     AgentResponse,
     ApiError,
@@ -190,7 +191,8 @@ API_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     responses=API_ERROR_RESPONSES,
 )
 async def run_agent(
-    body: AgentRequest, runner: Annotated[AgentRunner, Depends(get_runner)]
+    body: Annotated[AgentRequest, Body(openapi_examples=REQUEST_EXAMPLES)],
+    runner: Annotated[AgentRunner, Depends(get_runner)],
 ) -> AgentResponse:
     try:
         return await runner.run(body)

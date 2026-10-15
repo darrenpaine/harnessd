@@ -137,15 +137,34 @@ _NOTE_CALL: JsonDict = {
 }
 
 
+# Named request examples, shown as a list in Swagger UI (SPEC-0007 B-0005).
+REQUEST_EXAMPLES: dict[str, JsonDict] = {
+    "new": {
+        "summary": "New conversation",
+        "description": "No thread_id: a new thread starts. Keep the thread_id "
+        "from the response to continue it.",
+        "value": {"message": "What is new in Python 3.14?", "max_tool_calls": 5},
+    },
+    "continue": {
+        "summary": "Continue a thread",
+        "description": "Send the thread_id from an earlier response.",
+        "value": {"thread_id": _THREAD, "message": "And what changed in 3.13?"},
+    },
+    "confirm": {
+        "summary": "Confirm a pending action",
+        "description": "Answer an awaiting_confirmation response: true runs the "
+        "action, false rejects it.",
+        "value": {"thread_id": _THREAD, "confirm": True},
+    },
+}
+
+
 class AgentRequest(_Model):
     """One turn on a thread: a new user message, or a confirmation decision."""
 
     model_config = ConfigDict(
         json_schema_extra={
-            "examples": [
-                {"message": "What is new in Python 3.14?", "max_tool_calls": 5},
-                {"thread_id": _THREAD, "confirm": True},
-            ]
+            "examples": [example["value"] for example in REQUEST_EXAMPLES.values()]
         }
     )
 
