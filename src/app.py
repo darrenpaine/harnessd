@@ -12,8 +12,17 @@ import redis.exceptions
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from langchain_core.exceptions import ModelConnectionError
+from langchain_core.exceptions import (
+    ModelAuthenticationError,
+    ModelConnectionError,
+    ModelError,
+    ModelNotFoundError,
+    ModelPermissionDeniedError,
+    ModelRateLimitError,
+    ModelTimeoutError,
+)
 from langgraph.graph.state import CompiledStateGraph
+from ollama import ResponseError as OllamaResponseError
 from redis.asyncio import Redis
 from redisvl.exceptions import RedisSearchError
 
@@ -44,7 +53,32 @@ DESCRIPTION = (
 )
 
 REDIS_ERRORS = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
-LLM_ERRORS = (httpx.TransportError, ModelConnectionError)
+LLM_ERRORS = (httpx.TransportError, ModelConnectionError, ModelTimeoutError)
+
+
+class ProviderRejectedError(Exception):
+    """The LLM provider answered but refused the request (SPEC-0002 B-0007)."""
+
+
+def provider_rejection(exc: Exception, model: str) -> str | None:
+    """Why the provider refused the request, or None if it didn't.
+
+    Anthropic and Gemini errors arrive as LangChain's ModelError types; Ollama
+    raises its own ResponseError with the HTTP status. Messages are fixed text,
+    so no provider detail (such as a key) reaches the client.
+    """
+    status = exc.status_code if isinstance(exc, OllamaResponseError) else None
+    if isinstance(exc, ModelNotFoundError) or status == 404:
+        return f"the LLM provider has no model {model!r}"
+    if isinstance(exc, ModelAuthenticationError | ModelPermissionDeniedError) or (
+        status in (401, 403)
+    ):
+        return f"the LLM provider rejected the API key for model {model!r}"
+    if isinstance(exc, ModelRateLimitError) or status == 429:
+        return f"the LLM provider is rate-limiting requests for model {model!r}"
+    if isinstance(exc, ModelError | OllamaResponseError):
+        return f"the LLM provider rejected the request for model {model!r}"
+    return None
 
 
 def project_version() -> str:
@@ -172,9 +206,29 @@ app.add_exception_handler(RedisSearchError, wrapped_redis_error)
 for llm_error in LLM_ERRORS:
     app.add_exception_handler(llm_error, llm_unavailable)
 
+
+@app.exception_handler(ProviderRejectedError)
+async def provider_rejected(
+    request: Request, exc: ProviderRejectedError
+) -> JSONResponse:
+    return _api_error(503, "dependency_unavailable", str(exc))
+
+
+@app.exception_handler(Exception)
+async def internal_error(request: Request, exc: Exception) -> JSONResponse:
+    """SPEC-0002 B-0008: no exception text leaves the service. The server
+    still logs the exception, as Starlette re-raises it after this response."""
+    return _api_error(500, "internal", "internal error")
+
+
 API_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: {"model": ApiError, "description": "A run is in progress on the thread."},
-    503: {"model": ApiError, "description": "Redis or the LLM provider is down."},
+    500: {"model": ApiError, "description": "An unexpected error."},
+    503: {
+        "model": ApiError,
+        "description": "Redis or the LLM provider is down, or the provider "
+        "refused the request.",
+    },
 }
 
 
@@ -193,6 +247,7 @@ API_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 async def run_agent(
     body: Annotated[AgentRequest, Body(openapi_examples=REQUEST_EXAMPLES)],
     runner: Annotated[AgentRunner, Depends(get_runner)],
+    settings: SettingsDep,
 ) -> AgentResponse:
     try:
         return await runner.run(body)
@@ -209,6 +264,10 @@ async def run_agent(
                 }
             ]
         ) from exc
+    except Exception as exc:
+        if reason := provider_rejection(exc, settings.llm_model):
+            raise ProviderRejectedError(reason) from exc
+        raise
 
 
 @app.get(

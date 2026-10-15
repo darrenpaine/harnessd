@@ -290,7 +290,7 @@ class AgentResponse(_Model):
         return self
 
 
-ApiErrorCode = Literal["thread_busy", "dependency_unavailable"]
+ApiErrorCode = Literal["thread_busy", "dependency_unavailable", "internal"]
 
 
 class ApiErrorDetail(_Model):
@@ -299,7 +299,7 @@ class ApiErrorDetail(_Model):
 
 
 class ApiError(_Model):
-    """Body of a 409 or 503 response (SPEC-0002, SPEC-0007 B-0004)."""
+    """Body of a 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004)."""
 
     error: ApiErrorDetail
 

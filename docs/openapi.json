@@ -288,7 +288,7 @@
       },
       "ApiError": {
         "additionalProperties": false,
-        "description": "Body of a 409 or 503 response (SPEC-0002, SPEC-0007 B-0004).",
+        "description": "Body of a 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004).",
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ApiErrorDetail"
@@ -306,7 +306,8 @@
           "code": {
             "enum": [
               "thread_busy",
-              "dependency_unavailable"
+              "dependency_unavailable",
+              "internal"
             ],
             "title": "Code",
             "type": "string"
@@ -759,6 +760,16 @@
             },
             "description": "Validation Error"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "An unexpected error."
+          },
           "503": {
             "content": {
               "application/json": {
@@ -767,7 +778,7 @@
                 }
               }
             },
-            "description": "Redis or the LLM provider is down."
+            "description": "Redis or the LLM provider is down, or the provider refused the request."
           }
         },
         "summary": "Run the agent on a thread",
