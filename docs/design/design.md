@@ -42,11 +42,11 @@ flowchart LR
     client -->|/docs, /redoc| api
     api -->|AgentRequest| runner[Agent runner<br/>src/agent/runner.py]
     runner -->|thread lock, TTL refresh| redis[(Redis 8.2)]
-    runner --> graph[LangGraph agent<br/>src/agent/graph.py]
-    graph <-->|checkpoints| redis
-    graph --> llm[Chat model<br/>src/agent/llm.py]
+    runner --> graph_node[LangGraph agent<br/>src/agent/graph.py]
+    graph_node <-->|checkpoints| redis
+    graph_node --> llm[Chat model<br/>src/agent/llm.py]
     llm -.-> providers[Ollama / Claude / Gemini]
-    graph -->|call_tool| tools[Tools<br/>src/tools/]
+    graph_node -->|call_tool| tools[Tools<br/>src/tools/]
     tools -.-> tavily[Tavily API]
     tools -.-> web[Public web pages]
     tools -.-> notes[(notes.txt)]
