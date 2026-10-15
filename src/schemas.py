@@ -141,9 +141,13 @@ _NOTE_CALL: JsonDict = {
 REQUEST_EXAMPLES: dict[str, JsonDict] = {
     "new": {
         "summary": "New conversation",
-        "description": "No thread_id: a new thread starts. Keep the thread_id "
-        "from the response to continue it.",
-        "value": {"message": "What is new in Python 3.14?", "max_tool_calls": 5},
+        "description": "An unused thread_id starts a new thread; the other "
+        "examples continue it. Omit thread_id to have one generated.",
+        "value": {
+            "thread_id": _THREAD,
+            "message": "What is new in Python 3.14?",
+            "max_tool_calls": 5,
+        },
     },
     "continue": {
         "summary": "Continue a thread",

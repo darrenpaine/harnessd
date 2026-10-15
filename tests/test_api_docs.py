@@ -103,7 +103,9 @@ def test_request_examples_offered() -> None:
     for example in offered.values():
         assert example["summary"]
         AgentRequest.model_validate(example["value"])
-    assert "thread_id" not in offered["new"]["value"]
+    # One thread id, so the examples can be run in order on the same thread.
+    ids = {example["value"]["thread_id"] for example in offered.values()}
+    assert len(ids) == 1
     assert {"thread_id", "message"} <= set(offered["continue"]["value"])
     assert REQUEST_EXAMPLES.keys() == offered.keys()
 

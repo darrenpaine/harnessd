@@ -87,7 +87,8 @@
         "examples": [
           {
             "max_tool_calls": 5,
-            "message": "What is new in Python 3.14?"
+            "message": "What is new in Python 3.14?",
+            "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
           },
           {
             "message": "And what changed in 3.13?",
@@ -711,11 +712,12 @@
                   }
                 },
                 "new": {
-                  "description": "No thread_id: a new thread starts. Keep the thread_id from the response to continue it.",
+                  "description": "An unused thread_id starts a new thread; the other examples continue it. Omit thread_id to have one generated.",
                   "summary": "New conversation",
                   "value": {
                     "max_tool_calls": 5,
-                    "message": "What is new in Python 3.14?"
+                    "message": "What is new in Python 3.14?",
+                    "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
                   }
                 }
               },
