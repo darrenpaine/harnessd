@@ -27,18 +27,29 @@ Ollama is the local default. Built by `build_chat_model()` in `src/agent/llm.py`
   between Ollama, Anthropic and Google. Building the model makes no network calls.
 - B-0002: The agent runs at most max_tool_calls tool calls per request. Errored calls
   count. If a model turn requests more calls than remain, none of that batch runs and
-  the run ends with status="truncated".
+  the run ends with status="truncated". `answer` then holds the text of that model
+  turn, or null if it had none.
 - B-0003: A ToolError returned by a tool (SPEC-0003) is passed back to the model as the
   tool result and recorded in tool_calls; the run continues.
 - B-0004: If the model's output cannot be used (e.g. tool args fail validation twice in
   a row, or no final answer), the run ends with status="error", code
-  "model_output_invalid"; no exception leaks.
+  "model_output_invalid"; no exception leaks. A call that names an unknown tool or
+  whose args fail the tool's Input model is returned to the model as ToolError
+  `invalid_input` and counts toward max_tool_calls. It is not added to tool_calls,
+  because a ToolCallRecord holds only valid input. If the next model turn also has
+  such a call, none of that turn's calls run and the run ends with this error. A
+  reply with no tool calls and no text also counts as no final answer.
 - B-0005: Before any tool with `side_effect=true` runs, the graph interrupts and ends
   the run with status="awaiting_confirmation" and pending_action set. Resuming with
   confirm=true runs the tool and continues; confirm=false records ToolError "rejected"
-  and continues.
+  and continues. The calls in one model turn run in order: calls before a
+  side-effecting call run first, and calls after it run once it is confirmed or
+  rejected. Each side-effecting call is confirmed separately.
 - B-0006: A run is limited to `RUN_TIMEOUT_SECONDS` (default 60) total; on timeout the
   run ends with status="error", code "internal".
+- B-0007: A thread stays usable after a truncated or timed-out run. On the next run,
+  tool calls from earlier turns that never ran are shown to the model as ToolError
+  `internal` ("not run"), so the history the provider sees is always well formed.
 
 ## Acceptance tests
 All use a scripted fake model (SPEC-0005).
@@ -58,6 +69,15 @@ All use a scripted fake model (SPEC-0005).
 - AT-0007 (B-0006): With RUN_TIMEOUT_SECONDS=0.1 and a fake model that sleeps past it
   → status="error", code "internal", no exception leaks.
   -> `tests/test_agent.py::test_run_timeout_errors`
+- AT-0008 (B-0004): Fake model calls an unknown tool once, then answers → status="ok",
+  tool_calls is empty, and the model received a ToolError `invalid_input`.
+  -> `tests/test_agent.py::test_invalid_call_returned_to_model`
+- AT-0009 (B-0005): Fake model requests web_search, add_note, web_search in one turn →
+  the first search runs, then awaiting_confirmation; confirm=true → add_note runs, then
+  the second search. -> `tests/test_confirmation.py::test_batch_runs_in_order`
+- AT-0010 (B-0007): After a truncated run, the next message's model call receives a
+  ToolError `internal` for each call that never ran.
+  -> `tests/test_agent.py::test_thread_usable_after_truncation`
 
 ## Non-goals
 Multi-agent routing, streaming, model fallback between providers.
