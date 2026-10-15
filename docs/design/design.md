@@ -69,11 +69,11 @@ yet written.
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace. | SPEC-0002, SPEC-0003 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
-| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`. | SPEC-0004 | built |
-| `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver), `ToolFailure`, `call_tool()`. | SPEC-0003 B-0001..B-0003 | review (PR #8) |
-| `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. | SPEC-0003 B-0005..B-0007 | review (PR #8) |
-| `src/agent/graph.py` | The agent loop: model node, tool node with the call cap, interrupt before side-effecting tools, malformed-output handling. | SPEC-0001 B-0002..B-0005 | planned |
-| `src/agent/runner.py` | What the API calls: thread lock → graph run under `RUN_TIMEOUT_SECONDS` → TTL refresh → `AgentResponse`. Maps Redis/LLM outages to 503. | SPEC-0001 B-0006, SPEC-0002, SPEC-0004 | planned |
+| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, and `RedisThreadGuard`, which the runner uses for both. | SPEC-0004 | built |
+| `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver), `ToolFailure`, `call_tool()`. | SPEC-0003 B-0001..B-0003 | built |
+| `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. | SPEC-0003 B-0005..B-0007 | built |
+| `src/agent/graph.py` | The agent loop: `model` node (cap and invalid-call checks), `tools` node (runs a turn's calls in order, stops before a side effect), `confirm` node (interrupt, then run or reject). Answers dangling calls in the prompt. | SPEC-0001 B-0002..B-0005, B-0007 | built |
+| `src/agent/runner.py` | What the API calls: `ThreadGuard.hold` (lock) → confirmation rules → graph run under `RUN_TIMEOUT_SECONDS` → `ThreadGuard.touch` (TTL) → `AgentResponse`. Raises `ThreadBusyError` and `ConfirmationStateError`; dependency errors propagate for the API to map to 503. | SPEC-0001 B-0006, SPEC-0002 B-0003, SPEC-0004 | built |
 | `scripts/export_openapi.py` | Writes `docs/openapi.json` (`make openapi`). | SPEC-0007 B-0006 | planned |
 | `scripts/trace.py` | Builds `docs/traceability.md` from specs and test markers and flags gaps. | SPEC-0006 | planned |
 | `tests/fakes.py` | `ScriptedChatModel`: replays scripted replies, records inputs. | SPEC-0005 B-0002 | built |
@@ -213,4 +213,3 @@ to every key containing the thread id (a UUID) after each run.
 - **Traceability script** (SPEC-0006) isn't built yet, so gaps are checked by hand.
   SPEC-0005 AT-0005 waits on it.
 - **Local Ollama**: the default model (`llama3.1`) must be pulled before local runs.
-- **Pending tests**: SPEC-0003 AT-0004 (side effect runs once) needs the graph.
