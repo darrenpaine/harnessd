@@ -7,15 +7,22 @@ from typing import Any
 import httpx
 import pytest
 import redis.exceptions
+from langchain_core.exceptions import (
+    ModelAuthenticationError,
+    ModelNotFoundError,
+    ModelRateLimitError,
+)
 from langchain_core.messages import AIMessage
 from langchain_ollama import ChatOllama
 from langgraph.checkpoint.memory import InMemorySaver
+from ollama import ResponseError as OllamaResponseError
 from redisvl.exceptions import RedisSearchError
 
 from agent.graph import build_graph
 from agent.persistence import lock_key
 from agent_support import Agent, note, tool_turn
 from app import Services, app, get_graph, get_guard
+from fakes import RaisingChatModel
 from settings import Settings, get_settings
 from tools import TOOLS
 from tools.base import ToolContext
@@ -250,3 +257,61 @@ async def test_real_wiring_reaches_the_model(redis_url: str) -> None:
     assert response.status_code == 503
     assert response.json()["error"]["message"] == "the LLM provider is unreachable"
     assert not locked
+
+
+@pytest.mark.spec("SPEC-0002", "B-0007", "AT-0008")
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (OllamaResponseError("model 'llama9' not found", 404), "has no model"),
+        (ModelNotFoundError("model not found"), "has no model"),
+        (ModelAuthenticationError("invalid x-api-key sk-secret"), "API key"),
+        (OllamaResponseError("unauthorized", 401), "API key"),
+        (ModelRateLimitError("slow down"), "rate-limiting"),
+        (OllamaResponseError("model does not support tools", 400), "rejected"),
+    ],
+    ids=[
+        "ollama-404",
+        "not-found",
+        "authentication",
+        "ollama-401",
+        "rate-limit",
+        "ollama-400",
+    ],
+)
+async def test_provider_rejection_returns_503(
+    make_client: MakeClient, tool_context: ToolContext, error: Exception, cause: str
+) -> None:
+    client, _ = make_client([])
+    model = RaisingChatModel(error=error)
+    graph = build_graph(model, tool_context, TOOLS, InMemorySaver())
+    app.dependency_overrides[get_graph] = lambda: graph
+
+    response = await client.post(RUN, json={"message": "hi"})
+
+    assert response.status_code == 503
+    detail = response.json()["error"]
+    assert detail["code"] == "dependency_unavailable"
+    assert cause in detail["message"]
+    assert repr(tool_context.settings.llm_model) in detail["message"]
+    assert "sk-secret" not in response.text
+
+
+@pytest.mark.spec("SPEC-0002", "B-0008", "AT-0009")
+async def test_unexpected_error_returns_500(
+    make_client: MakeClient, tool_context: ToolContext
+) -> None:
+    make_client([])  # installs the overrides; this test needs its own client
+    model = RaisingChatModel(error=RuntimeError("secret detail"))
+    graph = build_graph(model, tool_context, TOOLS, InMemorySaver())
+    app.dependency_overrides[get_graph] = lambda: graph
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as raw:
+        response = await raw.post(RUN, json={"message": "hi"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {"code": "internal", "message": "internal error"}
+    }
+    assert "secret detail" not in response.text
