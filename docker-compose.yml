@@ -10,7 +10,8 @@ services:
       timeout: 3s
       retries: 10
     volumes:
-      - redis-data:/data
+      # Redis saves to /data; keep it in a host folder (set REDIS_DATA_DIR in .env).
+      - ${REDIS_DATA_DIR:-./data/redis}:/data
 
   harnessd:
     build: .
@@ -30,6 +31,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-
-volumes:
-  redis-data:
