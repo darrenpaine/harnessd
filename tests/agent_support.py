@@ -52,10 +52,11 @@ class Agent:
         self.fetched: list[str] = []
         self.model = ScriptedChatModel(replies=replies, delay=delay)
         self.ctx = dataclasses.replace(ctx, transport=httpx.MockTransport(self._serve))
-        graph = build_graph(
+        self.graph = build_graph(
             self.model, self.ctx, TOOLS, checkpointer or InMemorySaver()
         )
-        self.runner = AgentRunner(graph, ctx.settings, guard or LocalThreadGuard())
+        self.guard = guard or LocalThreadGuard()
+        self.runner = AgentRunner(self.graph, ctx.settings, self.guard)
 
     def _serve(self, request: httpx.Request) -> httpx.Response:
         self.fetched.append(str(request.url))
