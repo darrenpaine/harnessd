@@ -203,8 +203,9 @@ to every key containing the thread id (a UUID) after each run.
 - **DNS rebinding** (fetch_site): addresses are checked before the request, but
   `httpx` resolves again when connecting. Fix by connecting to the checked IP if the
   service is ever exposed.
-- **TTL refresh cost**: `SCAN` over the keyspace per run is fine at this scale. A
-  per-thread key index would be needed for a large Redis.
+- **TTL refresh cost**: `SCAN` over the keyspace per run is fine at this scale but
+  grows with all of Redis. Planned fix: renew only the thread's keys through the
+  checkpointer's own per-thread index ([#14](https://github.com/darrenpaine/harnessd/issues/14)).
 - **add_note after timeout**: the file write runs in a worker thread that a timeout
   can't stop, so a note may be written even though the tool reported `timeout`.
 - **Swagger assets** load from a CDN, so `/docs` needs internet access in the browser.
