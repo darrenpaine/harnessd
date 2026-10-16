@@ -66,3 +66,33 @@ class ScriptedChatModel(BaseChatModel):
     ) -> Runnable[LanguageModelInput, AIMessage]:
         # Tool calls come from the script, so binding tools changes nothing.
         return self
+
+
+class RaisingChatModel(BaseChatModel):
+    """Chat model whose every call raises `error`, as a failing provider would."""
+
+    error: Exception
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    @property
+    def _llm_type(self) -> str:
+        return "raising"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise self.error
+
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        return self

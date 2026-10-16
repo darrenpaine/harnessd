@@ -42,13 +42,13 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py314"
-src = [".", "src", "tests"]
+src = [".", "src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]   # pycodestyle, pyflakes, isort, pyupgrade, bugbear
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]
 testpaths = ["tests"]
 addopts = "-ra"
 markers = [
@@ -61,11 +61,11 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.mypy]
 strict = true
 python_version = "3.14"
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
-module = ["tavily", "tavily.*"]
-ignore_missing_imports = true  # ships no type hints
+module = ["tavily", "tavily.*", "redisvl.*"]
+ignore_missing_imports = true  # ship no type hints
 
 [tool.uv]
 package = false  # an app, not installable

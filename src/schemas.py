@@ -11,6 +11,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from pydantic.config import JsonDict
 
 
 class _Model(BaseModel):
@@ -127,17 +128,73 @@ class ErrorInfo(_Model):
     message: str
 
 
+_THREAD = "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c10"
+_NOTE_CALL: JsonDict = {
+    "id": "call-1",
+    "name": "add_note",
+    "input": {"text": "buy milk"},
+    "output": {"written": True, "line": "2026-10-15T09:30:00Z\tbuy milk"},
+}
+
+
+# Named request examples, shown as a list in Swagger UI (SPEC-0007 B-0005).
+REQUEST_EXAMPLES: dict[str, JsonDict] = {
+    "new": {
+        "summary": "New conversation",
+        "description": "An unused thread_id starts a new thread; the other "
+        "examples continue it. Omit thread_id to have one generated.",
+        "value": {
+            "thread_id": _THREAD,
+            "message": "What is new in Python 3.14?",
+            "max_tool_calls": 5,
+        },
+    },
+    "continue": {
+        "summary": "Continue a thread",
+        "description": "Send the thread_id from an earlier response.",
+        "value": {"thread_id": _THREAD, "message": "And what changed in 3.13?"},
+    },
+    "confirm": {
+        "summary": "Confirm a pending action",
+        "description": "Answer an awaiting_confirmation response: true runs the "
+        "action, false rejects it.",
+        "value": {"thread_id": _THREAD, "confirm": True},
+    },
+}
+
+
 class AgentRequest(_Model):
-    thread_id: UUID | None = None
+    """One turn on a thread: a new user message, or a confirmation decision."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [example["value"] for example in REQUEST_EXAMPLES.values()]
+        }
+    )
+
+    thread_id: UUID | None = Field(
+        default=None,
+        description="Thread to continue. Omit to start a new thread.",
+    )
     message: (
         Annotated[
             str,
             StringConstraints(strip_whitespace=True, min_length=1, max_length=4000),
         ]
         | None
-    ) = None
-    confirm: bool | None = None
-    max_tool_calls: int = Field(default=5, ge=1, le=20)
+    ) = Field(
+        default=None,
+        description="The user's message, 1-4000 characters. "
+        "Exactly one of message and confirm must be set.",
+    )
+    confirm: bool | None = Field(
+        default=None,
+        description="Approve (true) or reject (false) the pending action. "
+        "Only valid while the thread is awaiting confirmation.",
+    )
+    max_tool_calls: int = Field(
+        default=5, ge=1, le=20, description="Most tool calls this request may make."
+    )
 
     @model_validator(mode="after")
     def _one_of_message_or_confirm(self) -> Self:
@@ -147,12 +204,71 @@ class AgentRequest(_Model):
 
 
 class AgentResponse(_Model):
-    thread_id: UUID
-    status: RunStatus
-    answer: str | None = None
-    tool_calls: list[ToolCallRecord] = []
-    pending_action: PendingAction | None = None
-    error: ErrorInfo | None = None
+    """The result of one run. Which fields are set depends on `status`."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "thread_id": _THREAD,
+                    "status": "ok",
+                    "answer": "Noted: buy milk.",
+                    "tool_calls": [_NOTE_CALL],
+                    "pending_action": None,
+                    "error": None,
+                },
+                {
+                    "thread_id": _THREAD,
+                    "status": "truncated",
+                    "answer": None,
+                    "tool_calls": [],
+                    "pending_action": None,
+                    "error": None,
+                },
+                {
+                    "thread_id": _THREAD,
+                    "status": "error",
+                    "answer": None,
+                    "tool_calls": [],
+                    "pending_action": None,
+                    "error": {
+                        "code": "model_output_invalid",
+                        "message": "the model gave no answer",
+                    },
+                },
+                {
+                    "thread_id": _THREAD,
+                    "status": "awaiting_confirmation",
+                    "answer": None,
+                    "tool_calls": [],
+                    "pending_action": {
+                        "tool": "add_note",
+                        "input": {"text": "buy milk"},
+                    },
+                    "error": None,
+                },
+            ]
+        }
+    )
+
+    thread_id: UUID = Field(description="The thread, new or continued.")
+    status: RunStatus = Field(description="How the run ended.")
+    answer: str | None = Field(
+        default=None,
+        description="The answer when status is ok; may hold a partial answer "
+        "when truncated; otherwise null.",
+    )
+    tool_calls: list[ToolCallRecord] = Field(
+        default=[], description="Tool calls made in this request, in order."
+    )
+    pending_action: PendingAction | None = Field(
+        default=None,
+        description="The action waiting for confirmation; set only when status "
+        "is awaiting_confirmation.",
+    )
+    error: ErrorInfo | None = Field(
+        default=None, description="What went wrong; set only when status is error."
+    )
 
     @model_validator(mode="after")
     def _fields_match_status(self) -> Self:
@@ -172,3 +288,21 @@ class AgentResponse(_Model):
         if (self.status == "error") != (self.error is not None):
             raise ValueError("error is set only when status is 'error'")
         return self
+
+
+ApiErrorCode = Literal["thread_busy", "dependency_unavailable", "internal"]
+
+
+class ApiErrorDetail(_Model):
+    code: ApiErrorCode
+    message: str
+
+
+class ApiError(_Model):
+    """Body of a 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004)."""
+
+    error: ApiErrorDetail
+
+
+class HealthResponse(_Model):
+    status: Literal["ok"] = "ok"

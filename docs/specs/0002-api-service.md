@@ -38,7 +38,8 @@ AgentResponse
 | 200 | Every completed run, whatever `status` | AgentResponse |
 | 422 | Invalid request | FastAPI's default validation body |
 | 409 | A run is already in progress on the thread_id | `{"error": {"code": "thread_busy", "message": ...}}` |
-| 503 | Redis or the LLM provider is unreachable | `{"error": {"code": "dependency_unavailable", "message": ...}}` |
+| 503 | Redis or the LLM provider is unreachable, or the provider rejects the request (B-0007) | `{"error": {"code": "dependency_unavailable", "message": ...}}` |
+| 500 | Any other unexpected error (B-0008) | `{"error": {"code": "internal", "message": ...}}` |
 
 The compiled graph is injected into handlers with a FastAPI dependency, so tests can
 override it.
@@ -56,6 +57,14 @@ Swagger UI, ReDoc and the OpenAPI schema are specified in SPEC-0007.
 - B-0005: If Redis or the LLM provider is unreachable, the request returns 503
   `dependency_unavailable`; no stack trace is returned.
 - B-0006: `GET /health` returns 200 `{"status": "ok"}` without calling Redis or the LLM.
+- B-0007: If the LLM provider is reachable but rejects the request for a reason the
+  client cannot fix (the model is not found, the API key is invalid or lacks
+  permission, the provider rate-limits the request, or another provider API error),
+  the request returns 503 `dependency_unavailable`. The message names the cause and
+  the model (e.g. "the LLM provider has no model 'llama9'"); it contains no API key and
+  no stack trace.
+- B-0008: Any other unexpected exception returns 500 with code `internal` and a fixed
+  message; no stack trace or exception text is returned. The exception is logged.
 
 ## Acceptance tests
 - AT-0001 (B-0001): Empty or whitespace message → 422 and the fake model is never called.
@@ -73,6 +82,13 @@ Swagger UI, ReDoc and the OpenAPI schema are specified in SPEC-0007.
   `dependency_unavailable`. -> `tests/test_api.py::test_dependency_unavailable_returns_503`
 - AT-0007 (B-0006): `GET /health` → 200 `{"status": "ok"}`.
   -> `tests/test_health.py::test_health_returns_ok`
+- AT-0008 (B-0007): The model raises Ollama's 404 "model not found", and separately
+  LangChain's not-found, authentication and rate-limit errors → 503
+  `dependency_unavailable`; the message names the cause; the key is not in the body.
+  -> `tests/test_api.py::test_provider_rejection_returns_503`
+- AT-0009 (B-0008): The graph raises an unexpected exception → 500
+  `{"error": {"code": "internal", ...}}` without the exception text.
+  -> `tests/test_api.py::test_unexpected_error_returns_500`
 
 ## Non-goals
 Auth, a UI, rate limiting. Streaming (SSE) comes in a later spec.

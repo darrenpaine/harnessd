@@ -23,12 +23,13 @@ Run these before saying a task is done.
 | Install        | `uv sync`                                                  |
 | Run (local)    | `docker compose up -d` (app + Redis)                       |
 | Redis only     | `docker compose up -d redis` (needed by `redis` tests)     |
-| Run (dev)      | `uv run uvicorn src.app:app --reload --port 5999` |
+| Run (dev)      | `uv run uvicorn app:app --app-dir src --reload --port 5999` |
 | Tests/Coverage | `uv run pytest --cov=src ./`                               |
 | One test       | `uv run pytest tests/path.py::test_name`                   |
 | Lint           | `uv run ruff check .`                                      |
 | Format         | `uv run ruff format .`                                     |
-| Types          | `uv run mypy src/ tests/`                                  |
+| Types          | `uv run mypy src/ tests/ scripts/`                         |
+| OpenAPI schema | `make openapi` (after any API change; commit `docs/openapi.json`) |
 
 CI runs lint, types, and tests on every push. Keep all three green. Check this locally using: `uv run pre-commit run --all-files`
 

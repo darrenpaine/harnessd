@@ -29,10 +29,10 @@ internet access.
 ### Operations
 | Endpoint | Tag | operationId | Responses documented |
 |----------|-----|-------------|----------------------|
-| `POST /v1/agent/run` | agent | `run_agent` | 200 AgentResponse, 409 ApiError, 422 HTTPValidationError, 503 ApiError |
+| `POST /v1/agent/run` | agent | `run_agent` | 200 AgentResponse, 409 ApiError, 422 HTTPValidationError, 500 ApiError, 503 ApiError |
 | `GET /health` | health | `health_check` | 200 `{"status": "ok"}` |
 
-ApiError is the 409/503 body from SPEC-0002, as a named model:
+ApiError is the 409/500/503 body from SPEC-0002, as a named model:
 `{"error": {"code": str, "message": str}}`.
 
 ### Committed schema
@@ -49,8 +49,10 @@ ApiError is the 409/503 body from SPEC-0002, as a named model:
 - B-0004: Every response code an endpoint can return (SPEC-0002 status table) is
   declared with its body schema. ApiError appears as a named schema component.
 - B-0005: Every field of AgentRequest and AgentResponse has a description.
-  AgentRequest has examples for a new message and for a confirmation. AgentResponse
-  has one example per status. Every example validates against its model.
+  AgentRequest has named examples, offered in Swagger UI's example list, for a new
+  conversation, continuing a thread (`thread_id` with `message`) and a confirmation.
+  AgentResponse has one example per status. Every example validates against its
+  model.
 - B-0006: `docs/openapi.json` equals the schema the app generates. Any API change must
   regenerate it in the same PR.
 
@@ -61,12 +63,14 @@ ApiError is the 409/503 body from SPEC-0002, as a named model:
   description. -> `tests/test_api_docs.py::test_schema_metadata`
 - AT-0003 (B-0003): Every operation has a summary, description, one tag and the
   expected unique operationId. -> `tests/test_api_docs.py::test_operations_documented`
-- AT-0004 (B-0004): `run_agent` declares 200/409/422/503 with the right schemas;
+- AT-0004 (B-0004): `run_agent` declares 200/409/422/500/503 with the right schemas;
   ApiError is in `components.schemas`.
   -> `tests/test_api_docs.py::test_error_responses_documented`
 - AT-0005 (B-0005): Every AgentRequest/AgentResponse field has a description; each
   model example validates against its model; AgentResponse examples cover all four
-  statuses. -> `tests/test_api_docs.py::test_model_examples_validate`
+  statuses; the run_agent request body offers the three named AgentRequest examples.
+  -> `tests/test_api_docs.py::test_model_examples_validate`,
+  `tests/test_api_docs.py::test_request_examples_offered`
 - AT-0006 (B-0006): `docs/openapi.json` equals `app.openapi()`.
   -> `tests/test_api_docs.py::test_committed_schema_up_to_date`
 

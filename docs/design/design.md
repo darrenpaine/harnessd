@@ -65,7 +65,7 @@ yet written.
 
 | Module | Responsibility | Spec | Status |
 |--------|----------------|------|--------|
-| `src/app.py` | FastAPI app. `GET /health` today; `POST /v1/agent/run`, error bodies and OpenAPI metadata to come. The runner is injected as a dependency. | SPEC-0002, SPEC-0007 | built (health only) |
+| `src/app.py` | FastAPI app: `POST /v1/agent/run`, `GET /health`, Swagger/ReDoc metadata. Dependencies `get_settings` → `get_graph` / `get_guard` → `get_runner`; tests override the graph and guard. `Services` builds the Redis client and graph on first use, so the app starts while Redis is down. Exception handlers map `ThreadBusyError` → 409, `ConfirmationStateError` → 422, and Redis/LLM connection errors → 503. | SPEC-0002, SPEC-0007 | built |
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace. | SPEC-0002, SPEC-0003 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
@@ -74,7 +74,7 @@ yet written.
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. | SPEC-0003 B-0005..B-0007 | built |
 | `src/agent/graph.py` | The agent loop: `model` node (cap and invalid-call checks), `tools` node (runs a turn's calls in order, stops before a side effect), `confirm` node (interrupt, then run or reject). Answers dangling calls in the prompt. | SPEC-0001 B-0002..B-0005, B-0007 | built |
 | `src/agent/runner.py` | What the API calls: `ThreadGuard.hold` (lock) → confirmation rules → graph run under `RUN_TIMEOUT_SECONDS` → `ThreadGuard.touch` (TTL) → `AgentResponse`. Raises `ThreadBusyError` and `ConfirmationStateError`; dependency errors propagate for the API to map to 503. | SPEC-0001 B-0006, SPEC-0002 B-0003, SPEC-0004 | built |
-| `scripts/export_openapi.py` | Writes `docs/openapi.json` (`make openapi`). | SPEC-0007 B-0006 | planned |
+| `scripts/export_openapi.py` | Writes `docs/openapi.json` (`make openapi`). | SPEC-0007 B-0006 | built |
 | `scripts/trace.py` | Builds `docs/traceability.md` from specs and test markers and flags gaps. | SPEC-0006 | planned |
 | `tests/fakes.py` | `ScriptedChatModel`: replays scripted replies, records inputs. | SPEC-0005 B-0002 | built |
 | `tests/conftest.py`, `tests/redis_support.py` | Clears API keys for every test; `redis_url` fixture (skip locally, fail in CI); `tool_context` fixture. | SPEC-0005 | built |
@@ -134,7 +134,7 @@ nothing is pending, is a 422 (SPEC-0002 B-0003).
 **API** (`src/schemas.py`, SPEC-0002):
 - `AgentRequest`: thread_id, exactly one of `message` / `confirm`, max_tool_calls (1..20).
 - `AgentResponse`: a model validator keeps the fields consistent with `status`.
-- `ErrorInfo`; `PendingAction`; `ApiError` for 409/503 (planned, SPEC-0007).
+- `ErrorInfo`; `PendingAction`; `ApiError` for 409/503 (SPEC-0007); `HealthResponse`.
 
 **Tools** (SPEC-0003):
 - `ToolError` with codes invalid_input, timeout, upstream_error, rejected, internal.
@@ -211,6 +211,11 @@ to every key containing the thread id (a UUID) after each run.
 - **add_note after timeout**: the file write runs in a worker thread that a timeout
   can't stop, so a note may be written even though the tool reported `timeout`.
 - **Swagger assets** load from a CDN, so `/docs` needs internet access in the browser.
+- **Detecting an unreachable dependency** relies on exception types: Redis
+  `ConnectionError`/`TimeoutError` (also when wrapped by redisvl's
+  `RedisSearchError`), `httpx.TransportError` (Ollama, Gemini) and LangChain's
+  `ModelConnectionError` (Anthropic). A provider that raises something else gives a
+  500 instead of a 503.
 - **langgraph-checkpoint-redis** emits a deprecation warning about
   `get_async_redis_connection`; watch for a breaking release.
 - **Traceability script** (SPEC-0006) isn't built yet, so gaps are checked by hand.
