@@ -7,10 +7,7 @@ the confirmation rules and turning the final state into an AgentResponse.
 import asyncio
 import logging
 import time
-from collections import defaultdict
-from collections.abc import AsyncGenerator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -19,7 +16,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from agent.graph import AgentState, run_counters
-from agent.persistence import ThreadBusyError
+from agent.persistence import ThreadGuard
 from logs import event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
 from settings import Settings
@@ -30,36 +27,6 @@ log = get_logger("runner")
 class ConfirmationStateError(Exception):
     """`message` sent while a confirmation is pending, or `confirm` with nothing
     pending (SPEC-0002 B-0003)."""
-
-
-class ThreadGuard(Protocol):
-    """One run per thread at a time, and the thread's expiry clock."""
-
-    def hold(self, thread_id: str) -> AbstractAsyncContextManager[None]:
-        """Hold the thread for one run, or raise ThreadBusyError."""
-        ...
-
-    async def touch(self, thread_id: str) -> None:
-        """Reset the thread's expiry after a run."""
-        ...
-
-
-class LocalThreadGuard:
-    """In-process guard for graphs with an in-memory checkpointer."""
-
-    def __init__(self) -> None:
-        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-    @asynccontextmanager
-    async def hold(self, thread_id: str) -> AsyncGenerator[None]:
-        lock = self._locks[thread_id]
-        if lock.locked():
-            raise ThreadBusyError(thread_id)
-        async with lock:
-            yield
-
-    async def touch(self, thread_id: str) -> None:
-        pass  # in-memory state does not expire
 
 
 class AgentRunner:

@@ -30,8 +30,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent.graph import AgentState, build_graph
 from agent.llm import build_chat_model
-from agent.persistence import RedisThreadGuard, ThreadBusyError, open_checkpointer
-from agent.runner import AgentRunner, ConfirmationStateError, ThreadGuard
+from agent.persistence import (
+    RedisThreadGuard,
+    ThreadBusyError,
+    ThreadGuard,
+    open_checkpointer,
+)
+from agent.runner import AgentRunner, ConfirmationStateError
 from logs import configure_logging, event, get_logger
 from schemas import (
     REQUEST_EXAMPLES,
