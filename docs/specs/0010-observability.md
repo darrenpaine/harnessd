@@ -42,7 +42,7 @@ Everything runs locally on open-source software; tracing is off unless configure
 | `LANGFUSE_HOST` | `http://localhost:3000` | Langfuse base URL; the OTLP endpoint is `<host>/api/public/otel`. |
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | none | Langfuse project keys, sent as OTLP basic auth. Required when tracing is on, unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` | none | Standard OTel variables; when set they override the Langfuse values, to send traces to another backend. |
-| `TRACE_CONTENT` | `true` | Record prompts, replies and tool inputs/outputs on spans. `false` keeps only names, ids, timings, token counts and status. |
+| `TRACE_CONTENT` | `true` | Record prompts, replies and tool inputs/outputs on spans. `false` keeps only names, ids, timings, token counts and status. Set `false` in shared deployments; `.env.example` says so. |
 | `LOG_FORMAT` | `text` | `text` (SPEC-0008 lines) or `json` (one JSON object per line). |
 
 ### Span tree (one trace per HTTP request)
@@ -134,11 +134,12 @@ Metrics and dashboards (Prometheus/Grafana), log shipping, sampling policies,
 alerting, user identity on traces, Langfuse prompt management.
 
 ## Open questions
-- New dependencies, to approve before implementation: `opentelemetry-sdk`,
-  `opentelemetry-exporter-otlp-proto-http`, `opentelemetry-instrumentation-fastapi`,
-  and one LangChain instrumentation for the `chat` spans:
-  `openinference-instrumentation-langchain` (Apache 2.0; recommended, widely used
-  and mapped by Langfuse) or `opentelemetry-instrumentation-langchain`
-  (OpenLLMetry). Writing the `chat` spans by hand is the no-dependency option.
-- `TRACE_CONTENT` default: `true` (drafted, best for local debugging) or `false`
-  (safer if traces are ever shared). Logs never hold content either way (SPEC-0008).
+None. Settled in review:
+- LLM `chat` spans come from `openinference-instrumentation-langchain` (Apache 2.0),
+  which hooks LangChain's callbacks so every model call is captured without code in
+  the graph, and whose attributes Langfuse maps. Dependencies to add at
+  implementation: `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`,
+  `opentelemetry-instrumentation-fastapi`, `openinference-instrumentation-langchain`.
+- `TRACE_CONTENT` defaults to `true`: seeing the exact prompt and reply is the main
+  reason to trace, and the stack is local. `.env.example` and the README say to set
+  it to `false` for shared deployments (SPEC-0014).
