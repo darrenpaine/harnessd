@@ -76,5 +76,4 @@ JSON log output, log shipping, metrics, tracing (OpenTelemetry), request ids
 separate from the thread id, per-module levels.
 
 ## Open questions
-- Should `debug` also log the user's message text? Drafted as never, so logs can be
-  shared without leaking conversations.
+None. The user's message text is never logged, at any level (B-0004).

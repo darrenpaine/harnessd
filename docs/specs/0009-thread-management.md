@@ -118,9 +118,5 @@ Listing threads, automatic compaction, editing or deleting single messages, undo
 a compaction, restoring a deleted thread.
 
 ## Open questions
-- Paths: drafted as REST verbs on one resource (`GET`/`DELETE /v1/threads/{id}`,
-  `POST /v1/threads/{id}/compact`) instead of `GET /v1/threads/state/{id}` and
-  `POST /v1/threads/delete/{id}`; the HTTP method already says what happens.
-- DELETE on an unknown thread: drafted as 404 to match GET. 204 (idempotent) is the
-  other option.
-- keep_turns default 2.
+None. Settled in review: REST paths, 404 for deleting an unknown thread,
+keep_turns default 2.
