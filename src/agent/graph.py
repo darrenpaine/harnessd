@@ -1,5 +1,7 @@
 """The agent loop: model turns, tool calls and confirmations (SPEC-0001)."""
 
+import logging
+import time
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
@@ -19,6 +21,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from logs import clip, event, get_logger
 from schemas import PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
 
@@ -29,6 +32,8 @@ SYSTEM_PROMPT = (
 )
 
 NOT_RUN = ToolError(code="internal", message="not run: the earlier run ended first")
+
+log = get_logger("graph")
 
 _RECORD: TypeAdapter[ToolCallRecord] = TypeAdapter(ToolCallRecord)
 
@@ -149,6 +154,42 @@ def _malformed_results(reply: AIMessage) -> list[ToolMessage]:
     ]
 
 
+def _step(node: str) -> None:
+    event(log, logging.INFO, "graph.step", node=node)
+
+
+def _log_call(call: ToolCall, result: BaseModel, started: float | None) -> None:
+    """tool.call for one call; `started` is None for calls that never ran."""
+    ms = 0 if started is None else round((time.perf_counter() - started) * 1000)
+    event(
+        log,
+        logging.INFO,
+        "tool.call",
+        tool=call["name"],
+        call_id=call["id"],
+        result=result.code if isinstance(result, ToolError) else "ok",
+        ms=ms,
+    )
+
+
+async def _run_call(
+    tool: Tool[Any, Any], call: ToolCall, ctx: ToolContext
+) -> BaseModel:
+    """Run one validated call, logging its input (debug) and result."""
+    event(
+        log,
+        logging.DEBUG,
+        "tool.input",
+        tool=call["name"],
+        call_id=call["id"],
+        input=clip(call["args"]),
+    )
+    started = time.perf_counter()
+    result: BaseModel = await call_tool(tool, call["args"], ctx)
+    _log_call(call, result, started)
+    return result
+
+
 def build_graph(
     model: BaseChatModel,
     ctx: ToolContext,
@@ -159,15 +200,24 @@ def build_graph(
     bound = model.bind_tools([tool_schema(tool) for tool in tools.values()])
 
     async def call_model(state: AgentState) -> Command[str]:
+        _step("model")
         prompt = [
             SystemMessage(content=SYSTEM_PROMPT),
             *answer_dangling_calls(state["messages"]),
         ]
+        started = time.perf_counter()
         reply = await bound.ainvoke(prompt)
         assert isinstance(reply, AIMessage)
         text = str(reply.text).strip()
         calls = reply.tool_calls
         malformed = _malformed_results(reply)
+        event(
+            log,
+            logging.INFO,
+            "model.reply",
+            tool_calls=len(calls) + len(malformed),
+            ms=round((time.perf_counter() - started) * 1000),
+        )
         update: dict[str, Any] = {"messages": [reply]}
 
         if not calls and not malformed:
@@ -196,6 +246,16 @@ def build_graph(
             update["outcome"] = Outcome(status="truncated", answer=text or None)
             return Command(update=update, goto=END)
 
+        for bad in reply.invalid_tool_calls:
+            event(
+                log,
+                logging.INFO,
+                "tool.call",
+                tool=bad["name"],
+                call_id=bad["id"],
+                result="invalid_input",
+                ms=0,
+            )
         update |= {
             "messages": [reply, *malformed],
             "queue": calls,
@@ -206,6 +266,7 @@ def build_graph(
 
     async def run_tools(state: AgentState) -> Command[str]:
         """Run queued calls in order, stopping before a side effect (B-0005)."""
+        _step("tools")
         queue = list(state["queue"])
         messages: list[BaseMessage] = []
         trace = list(state["trace"])
@@ -213,11 +274,12 @@ def build_graph(
             call = queue[0]
             data = _parse(call, tools)
             if isinstance(data, ToolError):
+                _log_call(call, data, None)
                 messages.append(_tool_message(data, call["id"] or ""))
             elif tools[call["name"]].side_effect:
                 break
             else:
-                result = await call_tool(tools[call["name"]], call["args"], ctx)
+                result = await _run_call(tools[call["name"]], call, ctx)
                 messages.append(_tool_message(result, call["id"] or ""))
                 trace.append(_record(call, data, result))
             queue.pop(0)
@@ -226,6 +288,7 @@ def build_graph(
 
     async def confirm(state: AgentState) -> Command[str]:
         """Pause for a human decision, then run or reject the call (B-0005)."""
+        _step("confirm")
         call, *rest = state["queue"]
         tool = tools[call["name"]]
         data = tool.input_model.model_validate(call["args"])
@@ -233,9 +296,10 @@ def build_graph(
         approved = interrupt(pending.model_dump(mode="json"))
         result: BaseModel
         if approved is True:
-            result = await call_tool(tool, call["args"], ctx)
+            result = await _run_call(tool, call, ctx)
         else:
             result = ToolError(code="rejected", message="the user declined this call")
+            _log_call(call, result, None)
         update = {
             "messages": [_tool_message(result, call["id"] or "")],
             "trace": [*state["trace"], _record(call, data, result)],

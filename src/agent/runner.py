@@ -5,6 +5,8 @@ the confirmation rules and turning the final state into an AgentResponse.
 """
 
 import asyncio
+import logging
+import time
 from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -18,8 +20,11 @@ from langgraph.types import Command
 
 from agent.graph import AgentState
 from agent.persistence import ThreadBusyError
+from logs import event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
 from settings import Settings
+
+log = get_logger("runner")
 
 
 class ConfirmationStateError(Exception):
@@ -72,6 +77,13 @@ class AgentRunner:
         """Run a request to its end. Raises ThreadBusyError and
         ConfirmationStateError; dependency failures propagate."""
         thread_id = request.thread_id or uuid4()
+        with thread_context(str(thread_id)):
+            started = time.perf_counter()
+            response = await self._run(request, thread_id)
+            _log_end(response, started)
+            return response
+
+    async def _run(self, request: AgentRequest, thread_id: UUID) -> AgentResponse:
         config: RunnableConfig = {"configurable": {"thread_id": str(thread_id)}}
         async with self.guard.hold(str(thread_id)):
             graph_input = await self._input(request, config)
@@ -84,6 +96,17 @@ class AgentRunner:
                 await self.guard.touch(str(thread_id))
         return _response(thread_id, values)
 
+    def _log_start(self, request: AgentRequest) -> None:
+        event(
+            log,
+            logging.INFO,
+            "run.start",
+            kind="message" if request.message is not None else "confirm",
+            max_tool_calls=request.max_tool_calls,
+            provider=self.settings.llm_provider,
+            model=self.settings.llm_model,
+        )
+
     async def _input(
         self, request: AgentRequest, config: RunnableConfig
     ) -> Command[Any] | AgentState:
@@ -92,6 +115,15 @@ class AgentRunner:
         if request.confirm is not None:
             if not pending:
                 raise ConfirmationStateError("nothing is awaiting confirmation")
+            self._log_start(request)
+            tool = snapshot.interrupts[0].value["tool"]
+            event(
+                log,
+                logging.INFO,
+                "confirm.decision",
+                tool=tool,
+                approved=request.confirm,
+            )
             # The paused call and its queue carry over; the counters are new.
             fresh = {
                 "max_tool_calls": request.max_tool_calls,
@@ -104,6 +136,7 @@ class AgentRunner:
             raise ConfirmationStateError(
                 "the thread is awaiting confirmation; send confirm instead"
             )
+        self._log_start(request)
         return AgentState(
             messages=[HumanMessage(content=request.message or "")],
             max_tool_calls=request.max_tool_calls,
@@ -129,6 +162,25 @@ class AgentRunner:
                 message=f"the run took longer than {limit:g} s",
             ),
         )
+
+
+def _log_end(response: AgentResponse, started: float) -> None:
+    """run.end, and confirm.wait when the run paused (SPEC-0008 B-0002)."""
+    if response.pending_action is not None:
+        event(log, logging.INFO, "confirm.wait", tool=response.pending_action.tool)
+    event(
+        log,
+        logging.INFO,
+        "run.end",
+        status=response.status,
+        tool_calls=len(response.tool_calls),
+        ms=_ms(started),
+        error=response.error.code if response.error is not None else None,
+    )
+
+
+def _ms(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
 
 
 def _response(thread_id: UUID, values: dict[str, Any]) -> AgentResponse:
