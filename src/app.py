@@ -59,14 +59,13 @@ log = get_logger("app")
 
 REDIS_ERRORS = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
 LLM_ERRORS = (httpx.TransportError, ModelConnectionError, ModelTimeoutError)
+# The provider answered but refused the request (SPEC-0002 B-0007). Handlers for
+# the more specific LLM_ERRORS subclasses of ModelError take precedence.
+PROVIDER_ERRORS = (ModelError, OllamaResponseError)
 
 
-class ProviderRejectedError(Exception):
-    """The LLM provider answered but refused the request (SPEC-0002 B-0007)."""
-
-
-def provider_rejection(exc: Exception, model: str) -> str | None:
-    """Why the provider refused the request, or None if it didn't.
+def provider_rejection(exc: Exception, model: str) -> str:
+    """Why the provider refused the request.
 
     Anthropic and Gemini errors arrive as LangChain's ModelError types; Ollama
     raises its own ResponseError with the HTTP status. Messages are fixed text,
@@ -81,9 +80,7 @@ def provider_rejection(exc: Exception, model: str) -> str | None:
         return f"the LLM provider rejected the API key for model {model!r}"
     if isinstance(exc, ModelRateLimitError) or status == 429:
         return f"the LLM provider is rate-limiting requests for model {model!r}"
-    if isinstance(exc, ModelError | OllamaResponseError):
-        return f"the LLM provider rejected the request for model {model!r}"
-    return None
+    return f"the LLM provider rejected the request for model {model!r}"
 
 
 def project_version() -> str:
@@ -150,9 +147,16 @@ class Services:
                 log.warning("closing the Redis client failed: %r", exc)
 
 
+def app_settings(app: FastAPI) -> Settings:
+    """Settings for code outside a request's dependencies (lifespan, error
+    handlers), honouring a test's `get_settings` override like the routes do."""
+    settings: Settings = app.dependency_overrides.get(get_settings, get_settings)()
+    return settings
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    settings = app.dependency_overrides.get(get_settings, get_settings)()
+    settings = app_settings(app)
     configure_logging(settings)
     app.state.services = Services()
     yield
@@ -225,18 +229,18 @@ async def llm_unavailable(request: Request, exc: Exception) -> JSONResponse:
     return _unavailable("the LLM provider is unreachable")
 
 
+async def provider_rejected(request: Request, exc: Exception) -> JSONResponse:
+    model = app_settings(request.app).llm_model
+    return _unavailable(provider_rejection(exc, model))
+
+
 for redis_error in REDIS_ERRORS:
     app.add_exception_handler(redis_error, redis_unavailable)
 app.add_exception_handler(RedisSearchError, wrapped_redis_error)
 for llm_error in LLM_ERRORS:
     app.add_exception_handler(llm_error, llm_unavailable)
-
-
-@app.exception_handler(ProviderRejectedError)
-async def provider_rejected(
-    request: Request, exc: ProviderRejectedError
-) -> JSONResponse:
-    return _unavailable(str(exc))
+for provider_error in PROVIDER_ERRORS:
+    app.add_exception_handler(provider_error, provider_rejected)
 
 
 class InternalErrorMiddleware:
@@ -303,7 +307,6 @@ API_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 async def run_agent(
     body: Annotated[AgentRequest, Body(openapi_examples=REQUEST_EXAMPLES)],
     runner: Annotated[AgentRunner, Depends(get_runner)],
-    settings: SettingsDep,
 ) -> AgentResponse:
     try:
         return await runner.run(body)
@@ -320,10 +323,6 @@ async def run_agent(
                 }
             ]
         ) from exc
-    except Exception as exc:
-        if reason := provider_rejection(exc, settings.llm_model):
-            raise ProviderRejectedError(reason) from exc
-        raise
 
 
 @app.get(
