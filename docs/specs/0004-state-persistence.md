@@ -44,7 +44,8 @@ All use real Redis (SPEC-0005), never a checkpointer mock.
   expiry while held. -> `tests/test_checkpoint.py::test_thread_lock_released`
 
 ## Non-goals
-Deleting threads through the API, listing threads, migrating checkpoint formats.
+Listing threads, migrating checkpoint formats. Reading, deleting and compacting
+threads through the API are in SPEC-0009.
 
 ## Open questions
 None.
