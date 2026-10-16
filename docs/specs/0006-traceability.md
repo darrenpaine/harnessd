@@ -23,10 +23,20 @@ that prove them, and gaps are found by a script rather than by reading.
   `(retired)`.
 - A spec lists the requirements it meets in its `Requirements:` header.
 
+### Spec status
+- `draft`: written, not yet reviewed. Code must not be written against it.
+- `reviewed`: approved; may be built.
+- `implemented`: every AT's test exists and passes on main. The PR that completes
+  the last AT changes the status, so the script then treats gaps as errors (B-0002).
+
 ### Formats the script relies on
 - Behavior: `- B-nnnn: <statement>`
 - Acceptance test: `- AT-nnnn (B-nnnn[, B-nnnn]): <description> -> \`<test path>\``
   where the test path is `tests/<file>.py` or `tests/<file>.py::<test_name>`.
+  Several paths may follow, comma-separated, each in backticks; text after the last
+  path (e.g. `(redis)`) is ignored. A check that is not a pytest test (a workflow
+  step, a Terraform test, an eval dataset) gives the committed file's path instead,
+  and the script checks that the file exists.
 - Test marker: `@pytest.mark.spec("SPEC-nnnn", "B-nnnn", "AT-nnnn", ...)` — one marker
   per spec, stacked when a test covers more than one spec.
 
@@ -37,6 +47,7 @@ that prove them, and gaps are found by a script rather than by reading.
 - Writes `docs/traceability.md`: one row per behavior with its spec, status, ATs, AT
   test paths, and the tests whose markers name it.
 - Exit code 0 when there are no errors, 1 otherwise.
+- CI runs it on every push, after the tests (B-0005).
 
 ## Behavior
 - B-0001: The script lists each spec's behaviors and acceptance tests, and the tests
@@ -48,6 +59,8 @@ that prove them, and gaps are found by a script rather than by reading.
 - B-0003: A marker that names an unknown spec, behavior or AT is always an error,
   whatever the spec's status.
 - B-0004: A malformed ID or AT line in a spec is reported with file and line number.
+- B-0005: CI runs the script on every push. Errors fail the build; pending gaps
+  don't.
 
 ## Acceptance tests
 All use small fixture spec and test folders under `tests/scripts/fixtures/`.
@@ -59,10 +72,12 @@ All use small fixture spec and test folders under `tests/scripts/fixtures/`.
   -> `tests/scripts/test_trace.py::test_unknown_marker_ids`
 - AT-0004 (B-0004): Spec with `- AT-01 (B-1)` → error naming file and line.
   -> `tests/scripts/test_trace.py::test_malformed_ids_reported`
+- AT-0005 (B-0005): The CI workflow has a step that runs `scripts/trace.py` after
+  pytest. -> `tests/scripts/test_trace.py::test_ci_runs_trace`
 
 ## Non-goals
 A web UI for the matrix; linking to issues or PRs; tracing design docs.
 
 ## Open questions
-- When should CI run the script? Proposed: once it's implemented, as a CI step that
-  fails on errors (pending gaps don't fail).
+None. Settled in review: CI runs the script on every push and fails on errors only
+(B-0005).
