@@ -26,11 +26,13 @@ from langgraph.graph.state import CompiledStateGraph
 from ollama import ResponseError as OllamaResponseError
 from redis.asyncio import Redis
 from redisvl.exceptions import RedisSearchError
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent.graph import AgentState, build_graph
 from agent.llm import build_chat_model
 from agent.persistence import RedisThreadGuard, ThreadBusyError, open_checkpointer
 from agent.runner import AgentRunner, ConfirmationStateError, ThreadGuard
+from logs import configure_logging, event, get_logger
 from schemas import (
     REQUEST_EXAMPLES,
     AgentRequest,
@@ -53,7 +55,7 @@ DESCRIPTION = (
     f"for confirmation. Behavior is specified in [the specs]({SPECS_URL})."
 )
 
-logger = logging.getLogger(__name__)
+log = get_logger("app")
 
 REDIS_ERRORS = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
 LLM_ERRORS = (httpx.TransportError, ModelConnectionError, ModelTimeoutError)
@@ -140,16 +142,18 @@ class Services:
         try:
             await self._stack.aclose()
         except REDIS_ERRORS as exc:
-            logger.warning("closing the checkpointer failed: %r", exc)
+            log.warning("closing the checkpointer failed: %r", exc)
         if self._redis is not None:
             try:
                 await self._redis.aclose()
             except REDIS_ERRORS as exc:
-                logger.warning("closing the Redis client failed: %r", exc)
+                log.warning("closing the Redis client failed: %r", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    settings = app.dependency_overrides.get(get_settings, get_settings)()
+    configure_logging(settings)
     app.state.services = Services()
     yield
     await app.state.services.aclose()
@@ -193,11 +197,18 @@ def _api_error(status: int, code: ApiErrorCode, message: str) -> JSONResponse:
 
 @app.exception_handler(ThreadBusyError)
 async def thread_busy(request: Request, exc: ThreadBusyError) -> JSONResponse:
+    event(log, logging.WARNING, "thread.busy", thread=exc.args[0] if exc.args else None)
     return _api_error(409, "thread_busy", "a run is already in progress on this thread")
 
 
+def _unavailable(cause: str) -> JSONResponse:
+    """503 dependency_unavailable (SPEC-0002 B-0005, B-0007), logged as a warning."""
+    event(log, logging.WARNING, "dependency.unavailable", cause=cause)
+    return _api_error(503, "dependency_unavailable", cause)
+
+
 async def redis_unavailable(request: Request, exc: Exception) -> JSONResponse:
-    return _api_error(503, "dependency_unavailable", "Redis is unreachable")
+    return _unavailable("Redis is unreachable")
 
 
 async def wrapped_redis_error(request: Request, exc: Exception) -> JSONResponse:
@@ -211,7 +222,7 @@ async def wrapped_redis_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 async def llm_unavailable(request: Request, exc: Exception) -> JSONResponse:
-    return _api_error(503, "dependency_unavailable", "the LLM provider is unreachable")
+    return _unavailable("the LLM provider is unreachable")
 
 
 for redis_error in REDIS_ERRORS:
@@ -225,14 +236,45 @@ for llm_error in LLM_ERRORS:
 async def provider_rejected(
     request: Request, exc: ProviderRejectedError
 ) -> JSONResponse:
-    return _api_error(503, "dependency_unavailable", str(exc))
+    return _unavailable(str(exc))
 
 
-@app.exception_handler(Exception)
-async def internal_error(request: Request, exc: Exception) -> JSONResponse:
-    """SPEC-0002 B-0008: no exception text leaves the service. The server
-    still logs the exception, as Starlette re-raises it after this response."""
-    return _api_error(500, "internal", "internal error")
+class InternalErrorMiddleware:
+    """Turn an unhandled exception into a JSON 500 (SPEC-0002 B-0008).
+
+    No exception text leaves the service; the exception is logged once, with
+    its traceback (SPEC-0008 B-0005). Starlette's own 500 handler would re-raise
+    it to the server, which logs it a second time. If the response has already
+    started, the exception is re-raised, as a 500 can no longer be sent.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracked(message: Message) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracked)
+        except Exception:
+            event(
+                log, logging.ERROR, "request.failed", exc_info=True, path=scope["path"]
+            )
+            if started:
+                raise
+            response = _api_error(500, "internal", "internal error")
+            await response(scope, receive, send)
+
+
+app.add_middleware(InternalErrorMiddleware)
 
 
 API_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
