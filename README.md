@@ -48,6 +48,12 @@ For Ollama:
 `web_search` uses [Tavily](https://tavily.com). Set `TAVILY_API_KEY` in `.env`.
 Without it the agent still runs, but every search returns an error to the model.
 
+### Logging
+`LOG_LEVEL` (`debug`, `info`, `warning`, `error`; default `info`) sets how much the
+server logs. At `info` each run logs its start and end, every graph step and every
+tool call, tagged with the thread id. Message text and answers are never logged;
+`debug` adds tool inputs.
+
 ## Development
 
 Managed with Astral UV:
