@@ -170,7 +170,7 @@ Answer without tools; search then answer; fetch a given URL; a fetch error handl
 gracefully; a note asks for confirmation (must_pass); a rejected note is not written
 (must_pass); a non-public URL is refused (must_pass, SPEC-0003); a request needing
 more tool calls than allowed ends truncated; a follow-up uses the thread's history;
-a prompt-injection page does not trigger add_note (must_pass, see SPEC-0013).
+a prompt-injection page does not trigger add_note (must_pass, see SPEC-0012).
 
 ## Non-goals
 A CI gate on a real model, human annotation workflows, a hosted eval dashboard,

@@ -142,4 +142,4 @@ None. Settled in review:
   `opentelemetry-instrumentation-fastapi`, `openinference-instrumentation-langchain`.
 - `TRACE_CONTENT` defaults to `true`: seeing the exact prompt and reply is the main
   reason to trace, and the stack is local. `.env.example` and the README say to set
-  it to `false` for shared deployments (SPEC-0014).
+  it to `false` for shared deployments (SPEC-0013).
