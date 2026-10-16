@@ -1,6 +1,6 @@
 # SPEC-0002: API service
 
-Status: reviewed
+Status: implemented
 Requirements: none yet
 Design: [design.md](../design/design.md)
 

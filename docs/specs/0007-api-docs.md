@@ -1,6 +1,6 @@
 # SPEC-0007: API documentation
 
-Status: reviewed
+Status: implemented
 Requirements: none yet
 Design: [design.md](../design/design.md)
 
