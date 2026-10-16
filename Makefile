@@ -29,6 +29,8 @@ mypy:
 	uv run mypy src/ tests/ scripts/
 openapi:
 	uv run python scripts/export_openapi.py
+trace:
+	uv run python scripts/trace.py
 
 ## Git checks
 pre-commit:
