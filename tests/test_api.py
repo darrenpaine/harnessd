@@ -9,8 +9,10 @@ import pytest
 import redis.exceptions
 from langchain_core.exceptions import (
     ModelAuthenticationError,
+    ModelConnectionError,
     ModelNotFoundError,
     ModelRateLimitError,
+    ModelTimeoutError,
 )
 from langchain_core.messages import AIMessage
 from langchain_ollama import ChatOllama
@@ -257,6 +259,31 @@ async def test_real_wiring_reaches_the_model(redis_url: str) -> None:
     assert response.status_code == 503
     assert response.json()["error"]["message"] == "the LLM provider is unreachable"
     assert not locked
+
+
+@pytest.mark.spec("SPEC-0002", "B-0005")
+@pytest.mark.parametrize(
+    "error",
+    [ModelConnectionError("refused"), ModelTimeoutError("slow")],
+    ids=["connection", "timeout"],
+)
+async def test_unreachable_provider_is_not_a_rejection(
+    make_client: MakeClient, tool_context: ToolContext, error: Exception
+) -> None:
+    """These subclass ModelError, but get the unreachable message, not B-0007's."""
+    client, _ = make_client([])
+    graph = build_graph(
+        RaisingChatModel(error=error), tool_context, TOOLS, InMemorySaver()
+    )
+    app.dependency_overrides[get_graph] = lambda: graph
+
+    response = await client.post(RUN, json={"message": "hi"})
+
+    assert response.status_code == 503
+    assert response.json()["error"] == {
+        "code": "dependency_unavailable",
+        "message": "the LLM provider is unreachable",
+    }
 
 
 @pytest.mark.spec("SPEC-0002", "B-0007", "AT-0008")

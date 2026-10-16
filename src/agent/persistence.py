@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any
+from typing import Any, Protocol
 
 from langgraph.checkpoint.redis.ashallow import AsyncShallowRedisSaver
 from redis.asyncio import Redis
@@ -15,6 +15,18 @@ LOCK_MARGIN_SECONDS = 30
 
 class ThreadBusyError(Exception):
     """Another run holds the lock for this thread (SPEC-0004 B-0005)."""
+
+
+class ThreadGuard(Protocol):
+    """One run per thread at a time, and the thread's expiry clock."""
+
+    def hold(self, thread_id: str) -> AbstractAsyncContextManager[None]:
+        """Hold the thread for one run, or raise ThreadBusyError."""
+        ...
+
+    async def touch(self, thread_id: str) -> None:
+        """Reset the thread's expiry after a run."""
+        ...
 
 
 def ttl_config(settings: Settings) -> dict[str, Any]:

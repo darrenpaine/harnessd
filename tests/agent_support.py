@@ -1,6 +1,10 @@
 """Build an agent runner on a scripted model and an in-memory checkpointer."""
 
+import asyncio
 import dataclasses
+from collections import defaultdict
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -9,13 +13,32 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent.graph import build_graph
-from agent.runner import AgentRunner, LocalThreadGuard, ThreadGuard
+from agent.persistence import ThreadBusyError, ThreadGuard
+from agent.runner import AgentRunner
 from fakes import ScriptedChatModel
 from schemas import AgentRequest, AgentResponse
 from tools import TOOLS
 from tools.base import ToolContext
 
 PAGE_TEXT = "page text"
+
+
+class LocalThreadGuard:
+    """In-process guard for graphs with an in-memory checkpointer."""
+
+    def __init__(self) -> None:
+        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+    @asynccontextmanager
+    async def hold(self, thread_id: str) -> AsyncGenerator[None]:
+        lock = self._locks[thread_id]
+        if lock.locked():
+            raise ThreadBusyError(thread_id)
+        async with lock:
+            yield
+
+    async def touch(self, thread_id: str) -> None:
+        pass  # in-memory state does not expire
 
 
 def tool_turn(*calls: tuple[str, dict[str, Any]], text: str = "") -> AIMessage:

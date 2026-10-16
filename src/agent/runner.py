@@ -7,10 +7,7 @@ the confirmation rules and turning the final state into an AgentResponse.
 import asyncio
 import logging
 import time
-from collections import defaultdict
-from collections.abc import AsyncGenerator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -18,9 +15,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from agent.graph import AgentState
-from agent.persistence import ThreadBusyError
-from logs import event, get_logger, thread_context
+from agent.graph import AgentState, run_counters
+from agent.persistence import ThreadGuard
+from logs import elapsed_ms, event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
 from settings import Settings
 
@@ -30,36 +27,6 @@ log = get_logger("runner")
 class ConfirmationStateError(Exception):
     """`message` sent while a confirmation is pending, or `confirm` with nothing
     pending (SPEC-0002 B-0003)."""
-
-
-class ThreadGuard(Protocol):
-    """One run per thread at a time, and the thread's expiry clock."""
-
-    def hold(self, thread_id: str) -> AbstractAsyncContextManager[None]:
-        """Hold the thread for one run, or raise ThreadBusyError."""
-        ...
-
-    async def touch(self, thread_id: str) -> None:
-        """Reset the thread's expiry after a run."""
-        ...
-
-
-class LocalThreadGuard:
-    """In-process guard for graphs with an in-memory checkpointer."""
-
-    def __init__(self) -> None:
-        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-
-    @asynccontextmanager
-    async def hold(self, thread_id: str) -> AsyncGenerator[None]:
-        lock = self._locks[thread_id]
-        if lock.locked():
-            raise ThreadBusyError(thread_id)
-        async with lock:
-            yield
-
-    async def touch(self, thread_id: str) -> None:
-        pass  # in-memory state does not expire
 
 
 class AgentRunner:
@@ -125,12 +92,7 @@ class AgentRunner:
                 approved=request.confirm,
             )
             # The paused call and its queue carry over; the counters are new.
-            fresh = {
-                "max_tool_calls": request.max_tool_calls,
-                "calls_used": 0,
-                "trace": [],
-                "outcome": None,
-            }
+            fresh = run_counters(request.max_tool_calls)
             return Command(resume=request.confirm, update=fresh)
         if pending:
             raise ConfirmationStateError(
@@ -139,12 +101,9 @@ class AgentRunner:
         self._log_start(request)
         return AgentState(
             messages=[HumanMessage(content=request.message or "")],
-            max_tool_calls=request.max_tool_calls,
-            calls_used=0,
-            trace=[],
-            outcome=None,
             queue=[],
             invalid_turns=0,
+            **run_counters(request.max_tool_calls),
         )
 
     async def _timed_out(
@@ -174,13 +133,9 @@ def _log_end(response: AgentResponse, started: float) -> None:
         "run.end",
         status=response.status,
         tool_calls=len(response.tool_calls),
-        ms=_ms(started),
+        ms=elapsed_ms(started),
         error=response.error.code if response.error is not None else None,
     )
-
-
-def _ms(started: float) -> int:
-    return round((time.perf_counter() - started) * 1000)
 
 
 def _response(thread_id: UUID, values: dict[str, Any]) -> AgentResponse:
