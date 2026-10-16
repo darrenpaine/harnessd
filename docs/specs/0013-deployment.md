@@ -69,8 +69,9 @@ infra/
 Provider versions are pinned in `versions.tf` and `.terraform.lock.hcl` is committed.
 
 ### Lambda settings (Terraform)
-- Image from ECR, arm64, 1024 MB, reserved concurrency 5 (cost cap, and it keeps
-  connections under Redis Cloud's free limit of 30).
+- Image from ECR, arm64, 1024 MB, reserved concurrency 5 (a cost cap). With the
+  pool in B-0003 capped at `REDIS_MAX_CONNECTIONS=5`, the stack opens at most
+  5 × 5 = 25 Redis connections, under Redis Cloud's free limit of 30.
 - Timeout = `RUN_TIMEOUT_SECONDS` + 30, at most 900. Log group retention 14 days.
 - Function URL with auth type NONE; the app checks the API key (B-0001).
 
@@ -83,7 +84,7 @@ Provider versions are pinned in `versions.tf` and `.terraform.lock.hcl` is commi
 | `REDIS_HEALTH_CHECK_SECONDS` | `30` | Ping an idle connection before reuse after this long. |
 | `REDIS_SOCKET_TIMEOUT_SECONDS` | `5` | Connect and read timeout. |
 | `REDIS_RETRIES` | `3` | Retries with exponential backoff and jitter on connection errors. |
-| `REDIS_MAX_CONNECTIONS` | `10` | Per process. |
+| `REDIS_MAX_CONNECTIONS` | `5` | Per process, for the one pool shared by the checkpointer and the lock client (B-0003). Reserved concurrency × this must stay within the database's connection limit. |
 
 ### Secrets (SSM, under `SSM_PARAMETER_PATH`)
 `GOOGLE_API_KEY` or `ANTHROPIC_API_KEY`, `TAVILY_API_KEY`, `API_KEY` and
@@ -111,8 +112,10 @@ the deploy roles.
 ### Redis hardening (all environments)
 - B-0003: The Redis client is built from `REDIS_URL` (TLS with `rediss://`) with a
   connect and read timeout, a health check on connections idle longer than
-  `REDIS_HEALTH_CHECK_SECONDS`, TCP keepalive, and a bounded pool. A connection that
-  went stale while the Lambda was frozen is detected and replaced before use.
+  `REDIS_HEALTH_CHECK_SECONDS`, TCP keepalive, and one connection pool per process
+  capped at `REDIS_MAX_CONNECTIONS`. The checkpointer and the thread lock share that
+  client (today each opens its own). A connection that went stale while the Lambda
+  was frozen is detected and replaced before use.
 - B-0004: Idempotent Redis operations (checkpoint reads, TTL refresh, lock release,
   pings) are retried up to `REDIS_RETRIES` times with exponential backoff and
   jitter on connection and timeout errors. Lock acquisition is not retried;
@@ -159,7 +162,7 @@ the deploy roles.
 - AT-0004 (B-0006): A refresh touches only the thread's keys and runs no SCAN.
   -> `tests/test_checkpoint.py::test_ttl_refresh_without_scan` (redis)
 - AT-0005 (B-0007): With NOTES_BACKEND=redis, a confirmed note is in the list and
-  the list stays capped. -> `tests/test_tools_add_note.py::test_redis_notes_backend` (redis)
+  the list stays capped. -> `tests/tools/test_add_note.py::test_redis_notes_backend` (redis)
 - AT-0006 (B-0008): A mock extension serving parameters → settings hold them; a
   missing one fails with its name only. -> `tests/test_settings.py::test_ssm_parameters`
 - AT-0007 (B-0009, B-0010): `terraform test` with mock providers asserts: arm64,
@@ -168,6 +171,9 @@ the deploy roles.
   -> `infra/app/tests/main.tftest.hcl`
 - AT-0008 (B-0011): The deploy workflow's smoke-test step fails the deploy on any
   of its three checks. -> `.github/workflows/deploy.yml` (smoke-test job)
+- AT-0009 (B-0003): The checkpointer and the lock use the same Redis client, whose
+  pool is capped at REDIS_MAX_CONNECTIONS.
+  -> `tests/test_redis_resilience.py::test_shared_bounded_pool`
 
 ## Non-goals
 Multiple environments (one `demo` stack), custom domain, WAF, high availability,
