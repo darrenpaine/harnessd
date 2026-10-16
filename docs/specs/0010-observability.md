@@ -1,6 +1,6 @@
 # SPEC-0010: Observability
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: [design.md](../design/design.md)
 

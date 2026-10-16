@@ -1,6 +1,6 @@
 # SPEC-0012: Guardrails and human oversight
 
-Status: draft
+Status: reviewed
 Requirements: none yet
 Design: [design.md](../design/design.md)
 
