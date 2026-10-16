@@ -15,9 +15,14 @@ is caught before it is merged.
 - **Own pytest-style harness, no framework.** Evals use the real `AgentRunner`, so
   they test the shipped code path, and each case names the spec behaviors it covers
   (SPEC-0006). No new dependency.
-- **Deterministic scoring first, optional judge.** Rule checks (status, tools, args,
-  answer text, limits) gate. A judge model scores answer quality against a rubric;
-  it is reported, not gating, until it proves stable.
+- **Deterministic scoring first, optional "System One" judge.** Rule checks (status,
+  tools, args, answer text, limits) gate. Answer quality is judged by a decision
+  model: a fast model that answers named questions with typed values and a
+  calibrated confidence, instead of writing text. The local default is Bespoke Labs'
+  `nimble` (Apache 2.0) served by Ollama's `/v1/systemone` endpoint; TypeSafe AI's
+  hosted `Jev` is the alternative. Typed answers with confidence are easier to
+  threshold and compare between runs than a chat model's free-text grade. Judge
+  scores are reported, not gating, until they prove stable.
 - **Local runs only; no CI gate.** CI has no LLM keys (SPEC-0005). Evals run with
   `make evals` against the configured provider. Each run is recorded in the repo
   and the report shows the history, so a regression is visible in review.
@@ -33,6 +38,7 @@ is caught before it is merged.
 | Langfuse experiments | Used as a viewer (runs are uploaded when tracing is on, SPEC-0010), not as the runner, so evals work without the Langfuse stack. |
 | CI gate on a hosted model | Possible later (a labelled-PR workflow with a repo secret and spend cap); deferred to keep CI key-free and free. |
 | Ollama in CI | Free, but CPU runners are slow and small models fail tool calls often, so scores would mostly measure the small model. |
+| Chat model as judge (LLM-as-judge) | The common approach, but free-text grades drift with the judge and need parsing; kept as a fallback judge for providers without a decision endpoint. |
 
 ## Inputs / Outputs
 ### Layout
@@ -62,6 +68,8 @@ src/evals/                      runner, scorers, report writer (typed, unit-test
   - answer_regex: str
   - max_tool_calls: int; max_latency_ms: int
 - rubric: str | null — what a good answer looks like, for the judge.
+- judge: optional extra questions for this case, in the same form as the default
+  judge questions below.
 
 Example:
 ```json
@@ -77,10 +85,21 @@ Example:
 - Each case runs `EVAL_REPEATS` times (default 3), each on a new thread. Case score =
   passes / repeats; the case passes when score ≥ 2/3.
 - Run score = mean case score; also reported by tag.
-- Judge (optional, `EVAL_JUDGE_MODEL` set): a fast, low-cost model with no
-  step-by-step reasoning ("System 1") grades each answer against `rubric` with a
-  1-5 score and a one-line reason, using a fixed prompt kept in `src/evals/`. The
-  judge's provider and model are recorded with the scores. Reported, never gating.
+- Judge (optional, `EVAL_JUDGE` set): the state sent to the decision model is the
+  case's messages, rubric, tool calls and final answer. The default questions:
+  - `answers_request`: yes/no — does the answer address what the user asked?
+  - `grounded`: yes/no — is every factual claim supported by the tool outputs or
+    the conversation?
+  - `follows_rubric`: yes/no — does it meet the case's rubric? (only with a rubric)
+  - `quality`: integer 1-5.
+
+  Each answer is recorded with its confidence. Judge score for a case = share of
+  yes answers, counting only answers with confidence ≥ `EVAL_JUDGE_MIN_CONFIDENCE`
+  (default 0.7); lower-confidence answers are listed as "unsure". Judges are behind
+  a `Judge` protocol in `src/evals/judge.py` with three implementations:
+  `ollama-systemone` (default; local, e.g. `nimble`), `jev` (TypeSafe AI API) and
+  `chat` (any SPEC-0001 chat model, prompted to return the same typed answers as
+  JSON). The judge kind and model are recorded with the scores.
 
 ### Run file
 `{run_id, started_at, git_sha, dirty, provider, model, judge_model, repeats,
@@ -97,7 +116,9 @@ Example:
 
 ### Settings
 `EVAL_REPEATS` (default 3), `EVAL_REGRESSION_POINTS` (default 5),
-`EVAL_JUDGE_PROVIDER`, `EVAL_JUDGE_MODEL` (unset → no judge).
+`EVAL_JUDGE` (`ollama-systemone` | `jev` | `chat`; unset → no judge),
+`EVAL_JUDGE_MODEL` (e.g. `nimble`), `EVAL_JUDGE_MIN_CONFIDENCE` (default 0.7),
+`JEV_API_KEY` (only for `jev`). The Ollama judge uses `OLLAMA_BASE_URL`.
 
 ## Behavior
 - B-0001: Every case line validates against EvalCase; ids are unique. An invalid
@@ -113,8 +134,10 @@ Example:
 - B-0005: Each full or partial run writes one run file; `REPORT.md` is regenerated
   from all run files: per model, the latest score vs baseline, a history table, and
   the failing cases with their failed checks.
-- B-0006: The judge, when set, scores each answer 1-5 with a reason; a judge error
-  is recorded for that case and does not fail the run.
+- B-0006: The judge, when set, answers the default and per-case questions for each
+  case with typed values and confidences; answers below the confidence floor are
+  recorded as unsure. A judge error or an untyped reply is recorded for that case
+  and does not fail the run.
 - B-0007: When tracing is on (SPEC-0010), each case run is traced with
   `eval.case_id` and `eval.run_id` attributes, and the scores are uploaded to Langfuse
   as a dataset run.
@@ -135,8 +158,10 @@ Unit tests use the scripted fake model; none call a real LLM.
   exit 1; no baseline → exit 0. -> `tests/test_evals.py::test_regression_gate`
 - AT-0006 (B-0005): Two run files → REPORT.md shows both in history and the latest
   failures. -> `tests/test_evals.py::test_report`
-- AT-0007 (B-0006): A judge that raises → that case records a judge error; the run
-  completes. -> `tests/test_evals.py::test_judge_failure`
+- AT-0007 (B-0006): A fake judge returning typed answers → the judge score counts
+  only confident answers and lists the rest as unsure; a judge that raises → that
+  case records a judge error and the run completes.
+  -> `tests/test_evals.py::test_judge_scoring`
 - AT-0008 (B-0008): The committed dataset validates and REPORT.md is up to date.
   -> `tests/test_evals.py::test_committed_evals_consistent`
 
@@ -152,9 +177,11 @@ A CI gate on a real model, human annotation workflows, a hosted eval dashboard,
 eval-driven prompt optimisation, benchmarking providers against each other.
 
 ## Open questions
-- "System One" judge: drafted as a fast, low-cost, non-reasoning model (e.g. a
-  Haiku- or Flash-Lite-class model, or a local Ollama model). Is that what you meant?
-- Stubbed tools by default (drafted), so scores don't move with the web. Live-tool
-  cases are opt-in per case.
-- Run files are committed (drafted), so the history is reviewable in PRs. The
-  alternative is to keep runs out of git and commit only REPORT.md and baselines.
+- Ollama's `/v1/systemone` endpoint arrived in Ollama 0.35, which one source says
+  was still a pre-release in late September 2026. The request and response shape
+  will be confirmed from Ollama's API docs at implementation time; until a stable
+  release ships it, the `chat` judge is the fallback.
+- Jev is in early access; the `jev` judge is built only if you have API access.
+
+Settled in review: stubbed tools by default (live per case); run files and
+REPORT.md are committed.
