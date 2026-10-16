@@ -1,6 +1,7 @@
 """FastAPI app and routes (SPEC-0002, SPEC-0007)."""
 
 import asyncio
+import logging
 import tomllib
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -51,6 +52,8 @@ DESCRIPTION = (
     "conversation state is kept per thread in Redis, and side-effecting tools wait "
     f"for confirmation. Behavior is specified in [the specs]({SPECS_URL})."
 )
+
+logger = logging.getLogger(__name__)
 
 REDIS_ERRORS = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
 LLM_ERRORS = (httpx.TransportError, ModelConnectionError, ModelTimeoutError)
@@ -129,9 +132,20 @@ class Services:
             return self._graph
 
     async def aclose(self) -> None:
-        await self._stack.aclose()
+        """Close the checkpointer and the Redis client.
+
+        Redis may already be gone at shutdown. That is logged, not raised, so
+        shutdown finishes and the client is closed even if the checkpointer fails.
+        """
+        try:
+            await self._stack.aclose()
+        except REDIS_ERRORS as exc:
+            logger.warning("closing the checkpointer failed: %r", exc)
         if self._redis is not None:
-            await self._redis.aclose()
+            try:
+                await self._redis.aclose()
+            except REDIS_ERRORS as exc:
+                logger.warning("closing the Redis client failed: %r", exc)
 
 
 @asynccontextmanager

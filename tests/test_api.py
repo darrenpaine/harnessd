@@ -315,3 +315,30 @@ async def test_unexpected_error_returns_500(
         "error": {"code": "internal", "message": "internal error"}
     }
     assert "secret detail" not in response.text
+
+
+@pytest.mark.spec("SPEC-0002", "B-0005")
+async def test_shutdown_survives_redis_errors(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Redis gone at shutdown: both closes are tried, nothing is raised."""
+    services = Services()
+    settings = Settings(_env_file=None, redis_url="redis://127.0.0.1:1")  # type: ignore[call-arg]
+    client = services.redis(settings)
+    closed: list[str] = []
+
+    async def checkpointer_lost() -> None:
+        closed.append("checkpointer")
+        raise redis.exceptions.ConnectionError("Connection refused")
+
+    async def client_timed_out() -> None:
+        closed.append("client")
+        raise redis.exceptions.TimeoutError("Timeout")
+
+    services._stack.push_async_callback(checkpointer_lost)
+    monkeypatch.setattr(client, "aclose", client_timed_out)
+
+    await services.aclose()
+
+    assert closed == ["checkpointer", "client"]
+    assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 2
