@@ -12,3 +12,5 @@ SPEC-0006.
 | SPEC-0005 | Test strategy | reviewed | [0005-test-strategy.md](0005-test-strategy.md) |
 | SPEC-0006 | Traceability | reviewed | [0006-traceability.md](0006-traceability.md) |
 | SPEC-0007 | API documentation | reviewed | [0007-api-docs.md](0007-api-docs.md) |
+| SPEC-0008 | Logging | draft | [0008-logging.md](0008-logging.md) |
+| SPEC-0009 | Thread management | draft | [0009-thread-management.md](0009-thread-management.md) |
