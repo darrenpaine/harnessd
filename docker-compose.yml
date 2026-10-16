@@ -22,6 +22,10 @@ services:
         required: false
     environment:
       REDIS_URL: redis://redis:6379
+      NOTES_PATH: /srv/data/notes/notes.txt
+    volumes:
+      # add_note writes here; keep it in a host folder (set NOTES_DIR in .env).
+      - ${NOTES_DIR:-./data/notes}:/srv/data/notes
     depends_on:
       redis:
         condition: service_healthy
