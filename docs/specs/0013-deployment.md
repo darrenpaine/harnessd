@@ -175,11 +175,12 @@ autoscaling tuning, Langfuse in the cloud (tracing stays local; SPEC-0010),
 Ollama in the cloud, blue/green deploys, MCP.
 
 ## Open questions
-- Redis Cloud's free plan: the docs list its size and limits, but I could not
-  confirm that it includes Search and JSON, or that the Terraform provider can
-  create a free database. To check before implementing. Fallback: the smallest paid
-  Essentials plan.
-- AWS Budgets email address and the monthly budget amount (drafted $5).
-- Cloud model: Gemini Flash-Lite (drafted; has a free tier) or Claude Haiku.
-- `deploy.yml` triggers: drafted as manual and release tags. Deploying on every
-  merge to main is the alternative.
+- Redis Cloud's free plan: the docs list its size and limits, but whether it
+  includes Search and JSON, and whether the Terraform provider can create a free
+  database, is unconfirmed. This is checked first at implementation (docs, then the
+  checkpointer tests against a hand-made free database), and only then is the
+  database plan chosen (free, or the smallest paid Essentials plan).
+
+Settled in review: Gemini Flash-Lite as the cloud model; a $5 monthly AWS budget;
+`deploy.yml` runs manually and on `v*` tags. The alert email is a Terraform
+variable supplied from a GitHub secret, never committed.
