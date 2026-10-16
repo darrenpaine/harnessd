@@ -18,7 +18,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from agent.graph import AgentState
+from agent.graph import AgentState, run_counters
 from agent.persistence import ThreadBusyError
 from logs import event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
@@ -125,12 +125,7 @@ class AgentRunner:
                 approved=request.confirm,
             )
             # The paused call and its queue carry over; the counters are new.
-            fresh = {
-                "max_tool_calls": request.max_tool_calls,
-                "calls_used": 0,
-                "trace": [],
-                "outcome": None,
-            }
+            fresh = run_counters(request.max_tool_calls)
             return Command(resume=request.confirm, update=fresh)
         if pending:
             raise ConfirmationStateError(
@@ -139,12 +134,9 @@ class AgentRunner:
         self._log_start(request)
         return AgentState(
             messages=[HumanMessage(content=request.message or "")],
-            max_tool_calls=request.max_tool_calls,
-            calls_used=0,
-            trace=[],
-            outcome=None,
             queue=[],
             invalid_turns=0,
+            **run_counters(request.max_tool_calls),
         )
 
     async def _timed_out(

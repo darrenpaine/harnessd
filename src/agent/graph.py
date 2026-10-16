@@ -47,16 +47,26 @@ class Outcome(TypedDict):
     message: NotRequired[str]
 
 
-class AgentState(TypedDict):
-    messages: Annotated[list[AnyMessage], add_messages]
-    # Reset by the runner at the start of every request:
+class RunCounters(TypedDict):
+    """The state reset at the start of every request; see `run_counters`."""
+
     max_tool_calls: int
     calls_used: int
     trace: list[dict[str, Any]]  # ToolCallRecord dumps, in call order
     outcome: Outcome | None
+
+
+class AgentState(RunCounters):
+    messages: Annotated[list[AnyMessage], add_messages]
     # Carried across a confirmation pause:
     queue: list[ToolCall]  # calls from the latest model turn not yet run
     invalid_turns: int  # model turns in a row with an invalid call
+
+
+def run_counters(max_tool_calls: int) -> RunCounters:
+    return RunCounters(
+        max_tool_calls=max_tool_calls, calls_used=0, trace=[], outcome=None
+    )
 
 
 Tools = Mapping[str, Tool[Any, Any]]
