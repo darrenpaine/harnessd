@@ -1,6 +1,6 @@
 # SPEC-0006: Traceability
 
-Status: reviewed
+Status: implemented
 Requirements: none yet
 Design: [design.md](../design/design.md)
 

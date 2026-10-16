@@ -1,6 +1,6 @@
 # SPEC-0005: Test strategy
 
-Status: reviewed
+Status: implemented
 Requirements: none yet
 Design: [design.md](../design/design.md)
 

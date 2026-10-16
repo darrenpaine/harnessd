@@ -80,6 +80,9 @@ The system prompt and the run counters (calls used, queued calls) are not return
   `internal`, a provider error → 503 as in SPEC-0002.
 - B-0009: Each endpoint logs one info event (SPEC-0008): `thread.read`,
   `thread.deleted`, `thread.compacted` (messages_removed, ms).
+- B-0010: The three operations are documented as SPEC-0007 B-0003 and B-0004
+  require, under the tag `threads`, and `docs/openapi.json` is regenerated
+  (SPEC-0007 B-0006).
 
 ## Acceptance tests
 Unit tests use the in-memory graph and a scripted fake model; tests named `redis`
@@ -110,7 +113,7 @@ use real Redis (SPEC-0005).
 - AT-0010 (B-0008): The summary model times out, raises a provider error, or returns
   empty text → 500 / 503 / 500 and GET shows the state unchanged.
   -> `tests/test_threads.py::test_compact_failure_leaves_state`
-- AT-0011 (B-0001..B-0008): The OpenAPI schema lists the three operations with the
+- AT-0011 (B-0010): The OpenAPI schema lists the three operations with the
   documented responses. -> `tests/test_api_docs.py::test_operations_documented`
 
 ## Non-goals

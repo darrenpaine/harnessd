@@ -9,8 +9,8 @@ SPEC-0006.
 | SPEC-0002 | API service | implemented | [0002-api-service.md](0002-api-service.md) |
 | SPEC-0003 | Tool contract | implemented | [0003-tool-contract.md](0003-tool-contract.md) |
 | SPEC-0004 | State and persistence | implemented | [0004-state-persistence.md](0004-state-persistence.md) |
-| SPEC-0005 | Test strategy | reviewed | [0005-test-strategy.md](0005-test-strategy.md) |
-| SPEC-0006 | Traceability | reviewed | [0006-traceability.md](0006-traceability.md) |
+| SPEC-0005 | Test strategy | implemented | [0005-test-strategy.md](0005-test-strategy.md) |
+| SPEC-0006 | Traceability | implemented | [0006-traceability.md](0006-traceability.md) |
 | SPEC-0007 | API documentation | implemented | [0007-api-docs.md](0007-api-docs.md) |
 | SPEC-0008 | Logging | implemented | [0008-logging.md](0008-logging.md) |
 | SPEC-0009 | Thread management | reviewed | [0009-thread-management.md](0009-thread-management.md) |

@@ -67,4 +67,5 @@ make lint     # lint files with ruff
 make fix      # lint files and fix
 make format   # format files with ruff
 make pytests  # Run pytest on tests
+make trace    # check spec traceability, write docs/traceability.md
 ```
