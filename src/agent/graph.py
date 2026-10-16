@@ -10,6 +10,7 @@ from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     BaseMessage,
+    InvalidToolCall,
     SystemMessage,
     ToolMessage,
 )
@@ -21,8 +22,8 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from logs import clip, event, get_logger
-from schemas import PendingAction, ToolCallRecord, ToolError
+from logs import clip, elapsed_ms, event, get_logger
+from schemas import ErrorCode, PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
 
 SYSTEM_PROMPT = (
@@ -32,6 +33,7 @@ SYSTEM_PROMPT = (
 )
 
 NOT_RUN = ToolError(code="internal", message="not run: the earlier run ended first")
+MALFORMED = ToolError(code="invalid_input", message="arguments are not valid JSON")
 
 log = get_logger("graph")
 
@@ -43,7 +45,7 @@ class Outcome(TypedDict):
 
     status: Literal["truncated", "error"]
     answer: NotRequired[str | None]
-    code: NotRequired[Literal["model_output_invalid"]]
+    code: NotRequired[ErrorCode]
     message: NotRequired[str]
 
 
@@ -156,11 +158,7 @@ def _record(call: ToolCall, data: BaseModel, result: BaseModel) -> dict[str, Any
 def _malformed_results(reply: AIMessage) -> list[ToolMessage]:
     """Results for calls whose args weren't valid JSON; they never run."""
     return [
-        _tool_message(
-            ToolError(code="invalid_input", message="arguments are not valid JSON"),
-            call["id"] or "",
-        )
-        for call in reply.invalid_tool_calls
+        _tool_message(MALFORMED, call["id"] or "") for call in reply.invalid_tool_calls
     ]
 
 
@@ -168,9 +166,10 @@ def _step(node: str) -> None:
     event(log, logging.INFO, "graph.step", node=node)
 
 
-def _log_call(call: ToolCall, result: BaseModel, started: float | None) -> None:
+def _log_call(
+    call: ToolCall | InvalidToolCall, result: BaseModel, started: float | None
+) -> None:
     """tool.call for one call; `started` is None for calls that never ran."""
-    ms = 0 if started is None else round((time.perf_counter() - started) * 1000)
     event(
         log,
         logging.INFO,
@@ -178,7 +177,7 @@ def _log_call(call: ToolCall, result: BaseModel, started: float | None) -> None:
         tool=call["name"],
         call_id=call["id"],
         result=result.code if isinstance(result, ToolError) else "ok",
-        ms=ms,
+        ms=0 if started is None else elapsed_ms(started),
     )
 
 
@@ -226,7 +225,7 @@ def build_graph(
             logging.INFO,
             "model.reply",
             tool_calls=len(calls) + len(malformed),
-            ms=round((time.perf_counter() - started) * 1000),
+            ms=elapsed_ms(started),
         )
         update: dict[str, Any] = {"messages": [reply]}
 
@@ -257,15 +256,7 @@ def build_graph(
             return Command(update=update, goto=END)
 
         for bad in reply.invalid_tool_calls:
-            event(
-                log,
-                logging.INFO,
-                "tool.call",
-                tool=bad["name"],
-                call_id=bad["id"],
-                result="invalid_input",
-                ms=0,
-            )
+            _log_call(bad, MALFORMED, None)
         update |= {
             "messages": [reply, *malformed],
             "queue": calls,

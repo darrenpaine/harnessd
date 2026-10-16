@@ -81,6 +81,11 @@ def event(
     logger.log(level, " ".join(parts), exc_info=exc_info)
 
 
+def elapsed_ms(started: float) -> int:
+    """Milliseconds since `started`, a `time.perf_counter()` reading."""
+    return round((time.perf_counter() - started) * 1000)
+
+
 def clip(value: object, limit: int = INPUT_LIMIT) -> str:
     """JSON for a debug field, cut to `limit` characters (B-0004)."""
     text = json.dumps(value, default=str, ensure_ascii=False, separators=(",", ":"))

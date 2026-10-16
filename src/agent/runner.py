@@ -17,7 +17,7 @@ from langgraph.types import Command
 
 from agent.graph import AgentState, run_counters
 from agent.persistence import ThreadGuard
-from logs import event, get_logger, thread_context
+from logs import elapsed_ms, event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
 from settings import Settings
 
@@ -133,13 +133,9 @@ def _log_end(response: AgentResponse, started: float) -> None:
         "run.end",
         status=response.status,
         tool_calls=len(response.tool_calls),
-        ms=_ms(started),
+        ms=elapsed_ms(started),
         error=response.error.code if response.error is not None else None,
     )
-
-
-def _ms(started: float) -> int:
-    return round((time.perf_counter() - started) * 1000)
 
 
 def _response(thread_id: UUID, values: dict[str, Any]) -> AgentResponse:
