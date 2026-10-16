@@ -4,10 +4,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["ollama", "anthropic", "google"]
+LogLevel = Literal["debug", "info", "warning", "error"]
 
 
 class Settings(BaseSettings):
@@ -30,6 +31,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     run_timeout_seconds: float = Field(default=60, gt=0)  # SPEC-0001 B-0006
     checkpoint_ttl_hours: float = Field(default=24, gt=0)  # SPEC-0004 B-0003
+    log_level: LogLevel = "info"  # SPEC-0008 B-0001
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _lower_log_level(cls, value: object) -> object:
+        return value.lower() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def _provider_key_present(self) -> Self:
