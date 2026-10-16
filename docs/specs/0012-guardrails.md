@@ -149,8 +149,6 @@ the injection cases, per-user quotas (no auth yet), a per-tool approval policy,
 an audit query API.
 
 ## Open questions
-- Default limits: 50k tokens per run and 200k per thread are drafted to sit well
-  above normal use (a 5-call run is usually under 20k). Adjust?
-- `INJECTION_SCREEN_ON_ERROR` defaults to `withhold` (fail closed): safer, but if
-  the screen model is down every search and fetch is withheld. `allow` keeps the
-  agent useful and relies on the other layers.
+None. Settled in review: defaults of 50k tokens per run and 200k per thread (well
+above normal use, a 5-call run is usually under 20k); the screen fails closed
+(`withhold`) by default.
