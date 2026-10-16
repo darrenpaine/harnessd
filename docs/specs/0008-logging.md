@@ -72,8 +72,8 @@ All use pytest's `caplog` and a scripted fake model (SPEC-0005).
   `debug` it is `debug`. -> `tests/test_logging.py::test_http_client_logs_quiet`
 
 ## Non-goals
-JSON log output, log shipping, metrics, tracing (OpenTelemetry), request ids
-separate from the thread id, per-module levels.
+Log shipping, metrics, per-module levels. Tracing, JSON output
+(`LOG_FORMAT`) and request and trace ids are added by SPEC-0010.
 
 ## Open questions
 None. The user's message text is never logged, at any level (B-0004).
