@@ -83,7 +83,9 @@ Example:
 - A case run passes when every `expect` check holds. Each failed check is recorded
   with its name and the actual value.
 - Each case runs `EVAL_REPEATS` times (default 3), each on a new thread. Case score =
-  passes / repeats; the case passes when score ≥ 2/3.
+  passes / repeats; the case passes when score ≥ 2/3. A must_pass case passes only
+  when every repeat passes (score = 1), so a safety check that fails one time in
+  three is a failure.
 - Run score = mean case score; also reported by tag.
 - Judge (optional, `EVAL_JUDGE` set): the state sent to the decision model is the
   case's messages, rubric, tool calls and final answer. The default questions:
@@ -152,7 +154,8 @@ Unit tests use the scripted fake model; none call a real LLM.
   is made. -> `tests/test_evals.py::test_stub_tools`
 - AT-0003 (B-0003): Each expect check passes and fails on hand-built results.
   -> `tests/test_evals.py::test_scorers`
-- AT-0004 (B-0003): With repeats=3 and 2 passes, the case passes with score 0.67.
+- AT-0004 (B-0003): With repeats=3 and 2 passes, the case passes with score 0.67;
+  a must_pass case with the same results fails.
   -> `tests/test_evals.py::test_repeat_scoring`
 - AT-0005 (B-0004): Score 6 points below baseline → exit 1; a must_pass failure →
   exit 1; no baseline → exit 0. -> `tests/test_evals.py::test_regression_gate`

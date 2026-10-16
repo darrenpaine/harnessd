@@ -92,11 +92,15 @@ and thread; none carries message text, answers or tool output.
 - B-0008: Token use is taken from each model reply's usage metadata; when a provider
   reports none, it is estimated as characters ÷ 4 and marked estimated in the audit
   event.
-- B-0009: When a run's tokens reach `MAX_TOKENS_PER_RUN`, or the thread's reach
-  `MAX_TOKENS_PER_THREAD`, the run makes no further model call and ends with status
-  error, code `budget_exceeded`, keeping its tool_calls so far. The thread stays
-  usable (SPEC-0001 B-0007); compaction resets the thread count to the summary's
-  size.
+- B-0009: When a run's tokens reach `MAX_TOKENS_PER_RUN`, the run makes no further
+  model call and ends with status error, code `budget_exceeded`, keeping its
+  tool_calls so far. The thread stays usable (SPEC-0001 B-0007): the next run has a
+  fresh run budget.
+- B-0014: When a thread's tokens reach `MAX_TOKENS_PER_THREAD`, the run in progress
+  ends as in B-0009, and every later run on the thread ends at once the same way,
+  with no model call, until the thread is compacted (SPEC-0009), which resets the
+  count to the summary's size, or deleted. The error message says to compact or
+  delete the thread.
 - B-0010: Spend is added to a Redis counter per UTC day after each model call. When
   `DAILY_COST_LIMIT_USD` is set and reached, new runs and compactions get 429
   `budget_exceeded` before taking the thread lock; a run already in progress
@@ -128,8 +132,9 @@ All use the scripted fake model and a fake decision model; none call a real LLM.
   MAX_TOKENS_PER_RUN on the second call → status error, budget_exceeded, no third
   model call; a later run on the thread works.
   -> `tests/test_budgets.py::test_run_token_budget`
-- AT-0007 (B-0009): A thread over MAX_TOKENS_PER_THREAD → the next run ends
-  budget_exceeded; after compaction it runs. -> `tests/test_budgets.py::test_thread_token_budget`
+- AT-0007 (B-0014): A thread over MAX_TOKENS_PER_THREAD → the next run ends
+  budget_exceeded without calling the model, with a message naming compaction; after
+  compaction it runs. -> `tests/test_budgets.py::test_thread_token_budget`
 - AT-0008 (B-0010): With the daily counter at the limit → POST /v1/agent/run → 429
   budget_exceeded and no lock taken. -> `tests/test_budgets.py::test_daily_cost_limit` (redis)
 - AT-0009 (B-0011): DAILY_COST_LIMIT_USD with an unpriced model → settings error.
