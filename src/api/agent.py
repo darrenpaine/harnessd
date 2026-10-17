@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 
 from agent.runner import AgentRunner, ConfirmationStateError
 from api.deps import get_runner
-from api.errors import UNAVAILABLE, UNEXPECTED, error_responses
+from api.errors import BUSY, UNAVAILABLE, UNEXPECTED, error_responses
 from schemas import REQUEST_EXAMPLES, AgentRequest, AgentResponse
 
 router = APIRouter(tags=["agent"])
@@ -24,7 +24,7 @@ router = APIRouter(tags=["agent"])
     ),
     responses=error_responses(
         {
-            409: "A run is in progress on the thread.",
+            409: BUSY,
             500: UNEXPECTED,
             503: UNAVAILABLE,
         }

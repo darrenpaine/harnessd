@@ -12,10 +12,9 @@ from uuid import UUID, uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
-from agent.graph import AgentState, run_counters
+from agent.graph import AgentGraph, RunInput, run_counters
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
@@ -32,7 +31,7 @@ class ConfirmationStateError(Exception):
 class AgentRunner:
     def __init__(
         self,
-        graph: CompiledStateGraph[AgentState],
+        graph: AgentGraph,
         settings: Settings,
         guard: ThreadGuard,
     ) -> None:
@@ -76,7 +75,7 @@ class AgentRunner:
 
     async def _input(
         self, request: AgentRequest, config: RunnableConfig
-    ) -> Command[Any] | AgentState:
+    ) -> Command[Any] | RunInput:
         snapshot = await self.graph.aget_state(config)
         pending = bool(snapshot.interrupts)
         if request.confirm is not None:
@@ -99,7 +98,7 @@ class AgentRunner:
                 "the thread is awaiting confirmation; send confirm instead"
             )
         self._log_start(request)
-        return AgentState(
+        return RunInput(
             messages=[HumanMessage(content=request.message or "")],
             queue=[],
             invalid_turns=0,

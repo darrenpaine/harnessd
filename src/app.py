@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from api import agent, health
+from api import agent, health, threads
 from api.deps import Services, app_settings
 from api.errors import add_error_handlers
 from logs import configure_logging
@@ -17,9 +17,10 @@ SPECS_URL = "https://github.com/darrenpaine/harnessd/blob/main/docs/specs/README
 
 DESCRIPTION = (
     "A LangGraph agent with three tools (web search, fetch a page, add a note) "
-    "behind one endpoint. Every response is a validated `AgentResponse`; "
-    "conversation state is kept per thread in Redis, and side-effecting tools wait "
-    f"for confirmation. Behavior is specified in [the specs]({SPECS_URL})."
+    "behind one endpoint, plus endpoints to read, delete and compact a thread. "
+    "Every run returns a validated `AgentResponse`; conversation state is kept "
+    "per thread in Redis, and side-effecting tools wait for confirmation. "
+    f"Behavior is specified in [the specs]({SPECS_URL})."
 )
 
 
@@ -54,4 +55,5 @@ app = FastAPI(
 )
 add_error_handlers(app)
 app.include_router(agent.router)
+app.include_router(threads.router)
 app.include_router(health.router)

@@ -1,8 +1,6 @@
 """POST /v1/agent/run (SPEC-0002), with the graph and guard injected."""
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable
-from typing import Any
 
 import httpx
 import pytest
@@ -22,8 +20,8 @@ from redisvl.exceptions import RedisSearchError
 
 from agent.graph import build_graph
 from agent.persistence import lock_key
-from agent_support import Agent, note, tool_turn
-from api.deps import Services, get_graph, get_guard
+from agent_support import MakeClient, note, tool_turn
+from api.deps import Services, get_graph
 from app import app
 from fakes import RaisingChatModel
 from settings import Settings, get_settings
@@ -31,34 +29,6 @@ from tools import TOOLS
 from tools.base import ToolContext
 
 RUN = "/v1/agent/run"
-
-MakeClient = Callable[..., tuple[httpx.AsyncClient, Agent]]
-
-
-@pytest.fixture
-async def make_client(
-    tool_context: ToolContext,
-) -> AsyncGenerator[MakeClient]:
-    """Build a client whose app runs a scripted agent on an in-memory graph."""
-    clients: list[httpx.AsyncClient] = []
-
-    def make(
-        replies: list[AIMessage], **agent_options: Any
-    ) -> tuple[httpx.AsyncClient, Agent]:
-        agent = Agent(tool_context, replies, **agent_options)
-        app.dependency_overrides[get_settings] = lambda: tool_context.settings
-        app.dependency_overrides[get_graph] = lambda: agent.graph
-        app.dependency_overrides[get_guard] = lambda: agent.guard
-        client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        )
-        clients.append(client)
-        return client, agent
-
-    yield make
-    for client in clients:
-        await client.aclose()
-    app.dependency_overrides.clear()
 
 
 @pytest.mark.spec("SPEC-0002", "B-0002")

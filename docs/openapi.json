@@ -288,7 +288,7 @@
       },
       "ApiError": {
         "additionalProperties": false,
-        "description": "Body of a 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004).",
+        "description": "Body of a 404, 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004).",
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ApiErrorDetail"
@@ -306,6 +306,8 @@
           "code": {
             "enum": [
               "thread_busy",
+              "thread_not_found",
+              "thread_awaiting_confirmation",
               "dependency_unavailable",
               "internal"
             ],
@@ -322,6 +324,62 @@
           "message"
         ],
         "title": "ApiErrorDetail",
+        "type": "object"
+      },
+      "CompactRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "keep_turns": {
+            "default": 2,
+            "description": "The most recent turns to keep word for word. A turn is a user message and everything after it up to the next user message.",
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Keep Turns",
+            "type": "integer"
+          }
+        },
+        "title": "CompactRequest",
+        "type": "object"
+      },
+      "CompactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "compacted": {
+            "description": "False when there was nothing to compact.",
+            "title": "Compacted",
+            "type": "boolean"
+          },
+          "messages_removed": {
+            "description": "Messages replaced by the summary.",
+            "title": "Messages Removed",
+            "type": "integer"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The thread's summary after the call.",
+            "title": "Summary"
+          },
+          "thread_id": {
+            "description": "The thread.",
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "compacted",
+          "messages_removed",
+          "summary"
+        ],
+        "title": "CompactResponse",
         "type": "object"
       },
       "ErrorInfo": {
@@ -480,6 +538,177 @@
           "input"
         ],
         "title": "PendingAction",
+        "type": "object"
+      },
+      "ThreadMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "The message text.",
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "description": "Who sent it.",
+            "enum": [
+              "user",
+              "assistant",
+              "tool"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The call a tool message answers.",
+            "title": "Tool Call Id"
+          },
+          "tool_calls": {
+            "default": [],
+            "description": "Calls an assistant message requested.",
+            "items": {
+              "$ref": "#/components/schemas/ThreadToolCall"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ThreadMessage",
+        "type": "object"
+      },
+      "ThreadState": {
+        "additionalProperties": false,
+        "description": "A thread's latest saved state (SPEC-0009 B-0001).",
+        "properties": {
+          "expires_in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds until the thread expires; null if it does not.",
+            "title": "Expires In Seconds"
+          },
+          "messages": {
+            "description": "The messages after the summary, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ThreadMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "pending_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PendingAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The action waiting for confirmation; set only when status is awaiting_confirmation."
+          },
+          "status": {
+            "description": "Whether an action awaits confirmation.",
+            "enum": [
+              "idle",
+              "awaiting_confirmation"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The summary written by the last compaction.",
+            "title": "Summary"
+          },
+          "thread_id": {
+            "description": "The thread.",
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "status",
+          "messages"
+        ],
+        "title": "ThreadState",
+        "type": "object"
+      },
+      "ThreadToolCall": {
+        "additionalProperties": false,
+        "description": "A tool call as the model sent it; invalid calls keep their raw args.",
+        "properties": {
+          "args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arguments; a string when they were not valid JSON.",
+            "title": "Args"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The call's id.",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tool the model asked for.",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "args"
+        ],
+        "title": "ThreadToolCall",
         "type": "object"
       },
       "ToolError": {
@@ -660,7 +889,7 @@
     }
   },
   "info": {
-    "description": "A LangGraph agent with three tools (web search, fetch a page, add a note) behind one endpoint. Every response is a validated `AgentResponse`; conversation state is kept per thread in Redis, and side-effecting tools wait for confirmation. Behavior is specified in [the specs](https://github.com/darrenpaine/harnessd/blob/main/docs/specs/README.md).",
+    "description": "A LangGraph agent with three tools (web search, fetch a page, add a note) behind one endpoint, plus endpoints to read, delete and compact a thread. Every run returns a validated `AgentResponse`; conversation state is kept per thread in Redis, and side-effecting tools wait for confirmation. Behavior is specified in [the specs](https://github.com/darrenpaine/harnessd/blob/main/docs/specs/README.md).",
     "title": "harnessd",
     "version": "0.1.0"
   },
@@ -784,6 +1013,242 @@
         "summary": "Run the agent on a thread",
         "tags": [
           "agent"
+        ]
+      }
+    },
+    "/v1/threads/{thread_id}": {
+      "delete": {
+        "description": "Remove the thread's saved state. A later run on the id starts anew.",
+        "operationId": "delete_thread",
+        "parameters": [
+          {
+            "description": "The thread's id.",
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "description": "The thread's id.",
+              "format": "uuid",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No such thread: unknown, expired or deleted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "A run is in progress on the thread."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Redis or the LLM provider is down, or the provider refused the request."
+          }
+        },
+        "summary": "Delete a thread",
+        "tags": [
+          "threads"
+        ]
+      },
+      "get": {
+        "description": "Return the thread's latest saved state: its messages, any summary, and the action awaiting confirmation. Does not reset the thread's expiry.",
+        "operationId": "get_thread",
+        "parameters": [
+          {
+            "description": "The thread's id.",
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "description": "The thread's id.",
+              "format": "uuid",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No such thread: unknown, expired or deleted."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Redis or the LLM provider is down, or the provider refused the request."
+          }
+        },
+        "summary": "Read a thread",
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/v1/threads/{thread_id}/compact": {
+      "post": {
+        "description": "Replace all but the last `keep_turns` turns with a model-written summary, which later runs receive in the system prompt.",
+        "operationId": "compact_thread",
+        "parameters": [
+          {
+            "description": "The thread's id.",
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "description": "The thread's id.",
+              "format": "uuid",
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CompactRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No such thread: unknown, expired or deleted."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "A run is in progress, or the thread is awaiting confirmation."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The summary call timed out or returned no text."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Redis or the LLM provider is down, or the provider refused the request."
+          }
+        },
+        "summary": "Compact a thread",
+        "tags": [
+          "threads"
         ]
       }
     }
