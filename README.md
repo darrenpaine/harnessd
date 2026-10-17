@@ -13,6 +13,31 @@ validated, structured responses. Conversation state is checkpointed in Redis.
 Gemini and local Ollama models.
 - Specs live in `docs/specs/`; see the [spec index](docs/specs/README.md).
 
+## How the agent works
+The agent is a LangGraph graph with three nodes. The model either answers or asks for
+tool calls; read-only tools run straight away, and a side-effecting tool (add_note)
+pauses the run until the user confirms or rejects it in the next request. State is
+checkpointed in Redis after every step. See the
+[design doc](docs/design/design.md#agent-graph) for details.
+
+```mermaid
+flowchart TD
+    start([START]) --> model
+    model["model<br/>send build_prompt(state) to the chat model"]
+    model -->|answer| ok([END: ok])
+    model -->|no answer, or invalid<br/>calls twice in a row| error([END: error<br/>model_output_invalid])
+    model -->|calls exceed max_tool_calls| truncated([END: truncated])
+    model -->|calls queued| tools
+    tools["tools<br/>run queued calls in order;<br/>invalid calls get ToolError invalid_input"]
+    tools -->|queue empty| model
+    tools -->|next call has a side effect| confirm
+    confirm["confirm<br/>interrupt with PendingAction"]
+    confirm -.->|"pause: awaiting_confirmation"| client([Client])
+    client -.->|"confirm true / false: Command(resume=...)"| confirm
+    confirm -->|"ran, or ToolError rejected;<br/>more calls queued"| tools
+    confirm -->|queue empty| model
+```
+
 ## Setup
 
 You need [uv](https://docs.astral.sh/uv/) and Docker (for Redis).

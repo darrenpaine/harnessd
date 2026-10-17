@@ -44,7 +44,7 @@ back to the model as a `ToolError`.
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|POST /v1/agent/run| api[FastAPI app<br/>src/app.py]
+    client([Client]) -->|POST /v1/agent/run| api[FastAPI app<br/>src/app.py, src/api/]
     client -->|/docs, /redoc| api
     api -->|AgentRequest| runner[Agent runner<br/>src/agent/runner.py]
     runner -->|thread lock, TTL refresh| redis[(Redis 8.2)]
@@ -132,6 +132,35 @@ sequenceDiagram
 With `confirm: false`, the graph records ToolError `rejected` for the pending call and
 continues. Sending a `message` while a confirmation is pending, or `confirm` when
 nothing is pending, is a 422 (SPEC-0002 B-0003).
+
+### Agent graph
+The graph has three nodes (`src/agent/graph.py`, SPEC-0001). Each node returns a
+`Command` naming the next node, and the checkpointer saves the state after every
+node, so a run can stop at any point and resume later.
+
+```mermaid
+flowchart TD
+    start([START]) --> model
+    model["model<br/>send build_prompt(state) to the chat model"]
+    model -->|answer| ok([END: ok])
+    model -->|no answer, or invalid<br/>calls twice in a row| error([END: error<br/>model_output_invalid])
+    model -->|calls exceed max_tool_calls| truncated([END: truncated])
+    model -->|calls queued| tools
+    tools["tools<br/>run queued calls in order;<br/>invalid calls get ToolError invalid_input"]
+    tools -->|queue empty| model
+    tools -->|next call has a side effect| confirm
+    confirm["confirm<br/>interrupt with PendingAction"]
+    confirm -.->|"pause: awaiting_confirmation"| client([Client])
+    client -.->|"confirm true / false: Command(resume=...)"| confirm
+    confirm -->|"ran, or ToolError rejected;<br/>more calls queued"| tools
+    confirm -->|queue empty| model
+```
+
+The state carries the thread's `messages`, the `queue` of calls from the latest model
+turn that have not run yet, the run counters (`max_tool_calls`, `calls_used`,
+`trace`, `outcome`, reset on each request) and `invalid_turns`. A paused `confirm`
+keeps its `queue` in the checkpoint, so the calls after it run once the user
+answers. The runner turns the final state into an `AgentResponse`.
 
 ### Data models and storage
 **API** (`src/schemas.py`, SPEC-0002):
