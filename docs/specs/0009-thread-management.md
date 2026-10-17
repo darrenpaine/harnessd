@@ -113,6 +113,9 @@ use real Redis (SPEC-0005).
 - AT-0010 (B-0008): The summary model times out, raises a provider error, or returns
   empty text → 500 / 503 / 500 and GET shows the state unchanged.
   -> `tests/test_threads.py::test_compact_failure_leaves_state`
+- AT-0012 (B-0009): GET, DELETE and compact each log their info event with the
+  thread id; `thread.compacted` has messages_removed and ms.
+  -> `tests/test_threads.py::test_thread_events_logged`
 - AT-0011 (B-0010): The OpenAPI schema lists the three operations with the
   documented responses. -> `tests/test_api_docs.py::test_operations_documented`
 
