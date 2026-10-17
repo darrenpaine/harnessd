@@ -65,7 +65,10 @@ yet written.
 
 | Module | Responsibility | Spec | Status |
 |--------|----------------|------|--------|
-| `src/app.py` | FastAPI app: `POST /v1/agent/run`, `GET /health`, Swagger/ReDoc metadata. Dependencies `get_settings` → `get_graph` / `get_guard` → `get_runner`; tests override the graph and guard. `Services` builds the Redis client and graph on first use, so the app starts while Redis is down. Exception handlers map `ThreadBusyError` → 409, `ConfirmationStateError` → 422, and Redis/LLM connection errors → 503. | SPEC-0002, SPEC-0007 | built |
+| `src/app.py` | Builds the FastAPI app: Swagger/ReDoc metadata, lifespan (logging, `Services`), error handlers and the routers. | SPEC-0002, SPEC-0007 | built |
+| `src/api/agent.py`, `src/api/health.py` | One `APIRouter` per area: `POST /v1/agent/run` (turns `ConfirmationStateError` into 422), `GET /health`. | SPEC-0002 | built |
+| `src/api/deps.py` | `Services` builds the Redis client and graph on first use, so the app starts while Redis is down. Dependencies `get_settings` → `get_graph` / `get_guard` → `get_runner`; tests override the graph and guard. | SPEC-0002 | built |
+| `src/api/errors.py` | Exception handlers: `ThreadBusyError` → 409, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace. | SPEC-0002, SPEC-0003 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
