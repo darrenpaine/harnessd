@@ -18,6 +18,20 @@ ROOT = Path(__file__).resolve().parent.parent
 OPERATIONS = {
     ("post", "/v1/agent/run"): ("agent", "run_agent"),
     ("get", "/health"): ("health", "health_check"),
+    ("get", "/v1/threads/{thread_id}"): ("threads", "get_thread"),
+    ("delete", "/v1/threads/{thread_id}"): ("threads", "delete_thread"),
+    ("post", "/v1/threads/{thread_id}/compact"): ("threads", "compact_thread"),
+}
+
+# SPEC-0009: each thread operation's responses, with the success body.
+THREAD_RESPONSES = {
+    ("get", "/v1/threads/{thread_id}"): ("200", "ThreadState", {"404", "422", "503"}),
+    ("delete", "/v1/threads/{thread_id}"): ("204", None, {"404", "409", "422", "503"}),
+    ("post", "/v1/threads/{thread_id}/compact"): (
+        "200",
+        "CompactResponse",
+        {"404", "409", "422", "500", "503"},
+    ),
 }
 
 
@@ -49,6 +63,7 @@ def test_schema_metadata() -> None:
 
 
 @pytest.mark.spec("SPEC-0007", "B-0003", "AT-0003")
+@pytest.mark.spec("SPEC-0009", "B-0010", "AT-0011")
 def test_operations_documented() -> None:
     paths = schema()["paths"]
     found = {
@@ -62,6 +77,15 @@ def test_operations_documented() -> None:
         assert op["operationId"] == operation_id
     ids = [op["operationId"] for op in found.values()]
     assert len(ids) == len(set(ids))
+    for (method, path), (ok, body, errors) in THREAD_RESPONSES.items():
+        responses = found[(method, path)]["responses"]
+        assert set(responses) == {ok, *errors}
+        if body is None:
+            assert "content" not in responses[ok]
+        else:
+            assert ref_name(responses[ok]) == body
+        for code in errors - {"422"}:
+            assert ref_name(responses[code]) == "ApiError"
 
 
 @pytest.mark.spec("SPEC-0007", "B-0004", "AT-0004")

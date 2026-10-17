@@ -172,7 +172,11 @@ def test_build_prompt() -> None:
     question = HumanMessage(content="read a")
     turn = tool_turn(fetch("a"))
     state = AgentState(
-        messages=[question, turn], queue=[], invalid_turns=0, **run_counters(5)
+        messages=[question, turn],
+        queue=[],
+        invalid_turns=0,
+        summary=None,
+        **run_counters(5),
     )
 
     system, *history = build_prompt(state)

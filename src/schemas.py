@@ -1,6 +1,6 @@
-"""Pydantic models for the API (SPEC-0002) and tool I/O (SPEC-0003)."""
+"""Pydantic models for the API (SPEC-0002, SPEC-0009) and tool I/O (SPEC-0003)."""
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -290,7 +290,88 @@ class AgentResponse(_Model):
         return self
 
 
-ApiErrorCode = Literal["thread_busy", "dependency_unavailable", "internal"]
+# --- Threads (SPEC-0009) -------------------------------------------------------
+
+ThreadStatus = Literal["idle", "awaiting_confirmation"]
+
+
+class ThreadToolCall(_Model):
+    """A tool call as the model sent it; invalid calls keep their raw args."""
+
+    id: str | None = Field(description="The call's id.")
+    name: str | None = Field(description="The tool the model asked for.")
+    args: dict[str, Any] | str | None = Field(
+        description="The arguments; a string when they were not valid JSON."
+    )
+
+
+class ThreadMessage(_Model):
+    role: Literal["user", "assistant", "tool"] = Field(description="Who sent it.")
+    content: str = Field(description="The message text.")
+    tool_calls: list[ThreadToolCall] = Field(
+        default=[], description="Calls an assistant message requested."
+    )
+    tool_call_id: str | None = Field(
+        default=None, description="The call a tool message answers."
+    )
+
+
+class ThreadState(_Model):
+    """A thread's latest saved state (SPEC-0009 B-0001)."""
+
+    thread_id: UUID = Field(description="The thread.")
+    status: ThreadStatus = Field(description="Whether an action awaits confirmation.")
+    pending_action: PendingAction | None = Field(
+        default=None,
+        description="The action waiting for confirmation; set only when status "
+        "is awaiting_confirmation.",
+    )
+    summary: str | None = Field(
+        default=None, description="The summary written by the last compaction."
+    )
+    messages: list[ThreadMessage] = Field(
+        description="The messages after the summary, oldest first."
+    )
+    expires_in_seconds: int | None = Field(
+        default=None,
+        description="Seconds until the thread expires; null if it does not.",
+    )
+
+    @model_validator(mode="after")
+    def _pending_matches_status(self) -> Self:
+        if (self.status == "awaiting_confirmation") != (
+            self.pending_action is not None
+        ):
+            raise ValueError(
+                "pending_action is set only when status is 'awaiting_confirmation'"
+            )
+        return self
+
+
+class CompactRequest(_Model):
+    keep_turns: int = Field(
+        default=2,
+        ge=0,
+        le=20,
+        description="The most recent turns to keep word for word. A turn is a "
+        "user message and everything after it up to the next user message.",
+    )
+
+
+class CompactResponse(_Model):
+    thread_id: UUID = Field(description="The thread.")
+    compacted: bool = Field(description="False when there was nothing to compact.")
+    messages_removed: int = Field(description="Messages replaced by the summary.")
+    summary: str | None = Field(description="The thread's summary after the call.")
+
+
+ApiErrorCode = Literal[
+    "thread_busy",
+    "thread_not_found",
+    "thread_awaiting_confirmation",
+    "dependency_unavailable",
+    "internal",
+]
 
 
 class ApiErrorDetail(_Model):
@@ -299,7 +380,7 @@ class ApiErrorDetail(_Model):
 
 
 class ApiError(_Model):
-    """Body of a 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004)."""
+    """Body of a 404, 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004)."""
 
     error: ApiErrorDetail
 

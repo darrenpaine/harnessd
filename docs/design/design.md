@@ -3,7 +3,7 @@
 Status: reviewed
 Specs: SPEC-0001 Agent core, SPEC-0002 API service, SPEC-0003 Tool contract,
 SPEC-0004 State and persistence, SPEC-0005 Test strategy, SPEC-0006 Traceability,
-SPEC-0007 API documentation (see [the spec index](../specs/README.md))
+SPEC-0007 API documentation, SPEC-0009 Thread management (see [the spec index](../specs/README.md))
 
 This document pulls together how the service is built and why. The specs are the
 contract; where this document and a spec disagree, the spec wins and this document
@@ -66,17 +66,18 @@ yet written.
 | Module | Responsibility | Spec | Status |
 |--------|----------------|------|--------|
 | `src/app.py` | Builds the FastAPI app: Swagger/ReDoc metadata, lifespan (logging, `Services`), error handlers and the routers. | SPEC-0002, SPEC-0007 | built |
-| `src/api/agent.py`, `src/api/health.py` | One `APIRouter` per area: `POST /v1/agent/run` (turns `ConfirmationStateError` into 422), `GET /health`. | SPEC-0002 | built |
-| `src/api/deps.py` | `Services` builds the Redis client and graph on first use, so the app starts while Redis is down. Dependencies `get_settings` → `get_graph` / `get_guard` → `get_runner`; tests override the graph and guard. | SPEC-0002 | built |
-| `src/api/errors.py` | Exception handlers: `ThreadBusyError` → 409, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
-| `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace. | SPEC-0002, SPEC-0003 | built |
+| `src/api/agent.py`, `src/api/threads.py`, `src/api/health.py` | One `APIRouter` per area: `POST /v1/agent/run` (turns `ConfirmationStateError` into 422); `GET`/`DELETE /v1/threads/{id}` and `POST /v1/threads/{id}/compact`; `GET /health`. | SPEC-0002, SPEC-0009 | built |
+| `src/api/deps.py` | `Services` builds the Redis client, chat model and graph on first use, so the app starts while Redis is down. Dependencies `get_settings` → `get_graph` / `get_guard` / `get_model` → `get_runner` / `get_threads`; tests override the graph, guard and model. | SPEC-0002, SPEC-0009 | built |
+| `src/api/errors.py` | Exception handlers: `ThreadBusyError` and `ThreadAwaitingConfirmationError` → 409, `ThreadNotFoundError` → 404, `SummaryError` → 500, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
+| `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
-| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol the runner depends on, and `RedisThreadGuard`, which implements it for both. | SPEC-0004 | built |
+| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
 | `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver), `ToolFailure`, `call_tool()`. | SPEC-0003 B-0001..B-0003 | built |
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. | SPEC-0003 B-0005..B-0007 | built |
-| `src/agent/graph.py` | The agent loop: `model` node (cap and invalid-call checks), `tools` node (runs a turn's calls in order, stops before a side effect), `confirm` node (interrupt, then run or reject). Answers dangling calls in the prompt. | SPEC-0001 B-0002..B-0005, B-0007 | built |
+| `src/agent/graph.py` | The agent loop: `model` node (cap and invalid-call checks), `tools` node (runs a turn's calls in order, stops before a side effect), `confirm` node (interrupt, then run or reject). `build_prompt` answers dangling calls and puts a compacted thread's summary in the system prompt. A run's input (`RunInput`) never carries the summary, so it survives later runs. | SPEC-0001 B-0002..B-0005, B-0007, SPEC-0009 B-0005 | built |
 | `src/agent/runner.py` | What the API calls: `ThreadGuard.hold` (lock) → confirmation rules → graph run under `RUN_TIMEOUT_SECONDS` → `ThreadGuard.touch` (TTL) → `AgentResponse`. Raises `ThreadBusyError` and `ConfirmationStateError`; dependency errors propagate for the API to map to 503. | SPEC-0001 B-0006, SPEC-0002 B-0003, SPEC-0004 | built |
+| `src/agent/threads.py` | `ThreadService`: read a thread's state (no lock, no TTL reset); delete it (lock → `adelete_thread`); compact it (lock → summary call under `RUN_TIMEOUT_SECONDS` → `RemoveMessage` for whole turns + `summary` via `aupdate_state` → TTL reset). | SPEC-0009 | built |
 | `scripts/export_openapi.py` | Writes `docs/openapi.json` (`make openapi`). | SPEC-0007 B-0006 | built |
 | `scripts/trace.py` | Builds `docs/traceability.md` from specs and test markers and flags gaps (`make trace`; run in CI). | SPEC-0006 | built |
 | `tests/fakes.py` | `ScriptedChatModel`: replays scripted replies, records inputs. | SPEC-0005 B-0002 | built |
@@ -166,7 +167,9 @@ answers. The runner turns the final state into an `AgentResponse`.
 **API** (`src/schemas.py`, SPEC-0002):
 - `AgentRequest`: thread_id, exactly one of `message` / `confirm`, max_tool_calls (1..20).
 - `AgentResponse`: a model validator keeps the fields consistent with `status`.
-- `ErrorInfo`; `PendingAction`; `ApiError` for 409/503 (SPEC-0007); `HealthResponse`.
+- `ErrorInfo`; `PendingAction`; `ApiError` for 404/409/500/503 (SPEC-0007); `HealthResponse`.
+- `ThreadState` (messages as user/assistant/tool `ThreadMessage`s, no system prompt or
+  run counters), `CompactRequest`, `CompactResponse` (SPEC-0009).
 
 **Tools** (SPEC-0003):
 - `ToolError` with codes invalid_input, timeout, upstream_error, rejected, internal.
@@ -183,7 +186,8 @@ answers. The runner turns the final state into an `AgentResponse`.
 
 The checkpointer sets a TTL only on keys it writes in the current run, so keys from
 earlier runs would expire first. `refresh_thread_ttl()` therefore re-applies the TTL
-to every key containing the thread id (a UUID) after each run.
+to every key containing the thread id (a UUID) after each run, except the lock key.
+`GET /v1/threads/{id}` reports the smallest of those TTLs as `expires_in_seconds`.
 
 **Files**:
 - Notes: `NOTES_PATH` (default `data/notes.txt`), one
@@ -207,7 +211,9 @@ to every key containing the thread id (a UUID) after each run.
 | Run exceeds `RUN_TIMEOUT_SECONDS` | status `error`, `internal` | SPEC-0001 B-0006 |
 | Process dies mid-run | lock expires after timeout + 30 s; thread usable again | SPEC-0004 B-0005 |
 | fetch_site URL (or redirect) points at a non-public address | ToolError `invalid_input` | SPEC-0003 B-0006 |
-| Thread id unknown or expired | new thread with that id | SPEC-0004 B-0002 |
+| Thread id unknown or expired | new thread with that id; 404 `thread_not_found` on the thread endpoints | SPEC-0004 B-0002, SPEC-0009 B-0001 |
+| Compacting a thread awaiting confirmation | 409 `thread_awaiting_confirmation` | SPEC-0009 B-0007 |
+| Summary call times out or returns no text | 500 `internal`, state unchanged (a provider error is a 503) | SPEC-0009 B-0008 |
 | Redis lacks the JSON/search modules | `redis` tests skip locally / fail in CI with a clear reason | SPEC-0005 B-0003 |
 
 ## Alternatives considered

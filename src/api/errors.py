@@ -24,6 +24,11 @@ from redisvl.exceptions import RedisSearchError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent.persistence import REDIS_ERRORS, ThreadBusyError
+from agent.threads import (
+    SummaryError,
+    ThreadAwaitingConfirmationError,
+    ThreadNotFoundError,
+)
 from api.deps import app_settings
 from logs import event, get_logger
 from schemas import ApiError, ApiErrorCode, ApiErrorDetail
@@ -37,6 +42,8 @@ PROVIDER_ERRORS = (ModelError, OllamaResponseError)
 
 UNEXPECTED = "An unexpected error."
 UNAVAILABLE = "Redis or the LLM provider is down, or the provider refused the request."
+BUSY = "A run is in progress on the thread."
+NOT_FOUND = "No such thread: unknown, expired or deleted."
 
 
 def error_responses(descriptions: dict[int, str]) -> dict[int | str, dict[str, Any]]:
@@ -77,6 +84,25 @@ async def thread_busy(request: Request, exc: Exception) -> JSONResponse:
     return api_error(409, "thread_busy", "a run is already in progress on this thread")
 
 
+async def thread_not_found(request: Request, exc: Exception) -> JSONResponse:
+    return api_error(404, "thread_not_found", "no such thread")
+
+
+async def thread_awaiting_confirmation(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    return api_error(
+        409,
+        "thread_awaiting_confirmation",
+        "the thread is awaiting confirmation; confirm or reject the action first",
+    )
+
+
+async def summary_failed(request: Request, exc: Exception) -> JSONResponse:
+    """SPEC-0009 B-0008: our own fixed text, so no provider detail leaks."""
+    return api_error(500, "internal", str(exc))
+
+
 def _unavailable(cause: str) -> JSONResponse:
     """503 dependency_unavailable (SPEC-0002 B-0005, B-0007), logged as a warning."""
     event(log, logging.WARNING, "dependency.unavailable", cause=cause)
@@ -108,6 +134,11 @@ async def provider_rejected(request: Request, exc: Exception) -> JSONResponse:
 
 def add_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ThreadBusyError, thread_busy)
+    app.add_exception_handler(ThreadNotFoundError, thread_not_found)
+    app.add_exception_handler(
+        ThreadAwaitingConfirmationError, thread_awaiting_confirmation
+    )
+    app.add_exception_handler(SummaryError, summary_failed)
     for redis_error in REDIS_ERRORS:
         app.add_exception_handler(redis_error, redis_unavailable)
     app.add_exception_handler(RedisSearchError, wrapped_redis_error)
