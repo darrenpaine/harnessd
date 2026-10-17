@@ -1,6 +1,6 @@
 # Requirements: harnessd back-end
 
-Status: draft
+Status: agreed
 Owner: github.com/darrenpaine
 
 ## Context

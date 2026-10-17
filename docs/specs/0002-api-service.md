@@ -1,7 +1,7 @@
 # SPEC-0002: API service
 
 Status: implemented
-Requirements: none yet
+Requirements: R-0004, R-0005, R-0026
 Design: [design.md](../design/design.md)
 
 ## Goal

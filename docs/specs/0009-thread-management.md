@@ -1,7 +1,7 @@
 # SPEC-0009: Thread management
 
 Status: reviewed
-Requirements: none yet
+Requirements: R-0010, R-0027
 Design: [design.md](../design/design.md)
 
 ## Goal

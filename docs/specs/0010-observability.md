@@ -1,7 +1,7 @@
 # SPEC-0010: Observability
 
 Status: reviewed
-Requirements: none yet
+Requirements: R-0014
 Design: [design.md](../design/design.md)
 
 ## Goal

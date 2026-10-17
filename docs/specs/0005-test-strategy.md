@@ -1,7 +1,7 @@
 # SPEC-0005: Test strategy
 
 Status: implemented
-Requirements: none yet
+Requirements: R-0024
 Design: [design.md](../design/design.md)
 
 ## Goal
