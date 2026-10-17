@@ -1,7 +1,7 @@
 # SPEC-0006: Traceability
 
 Status: implemented
-Requirements: none yet
+Requirements: R-0003
 Design: [design.md](../design/design.md)
 
 ## Goal

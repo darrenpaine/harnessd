@@ -1,7 +1,7 @@
 # SPEC-0008: Logging
 
 Status: implemented
-Requirements: none yet
+Requirements: R-0012
 Design: [design.md](../design/design.md)
 
 ## Goal

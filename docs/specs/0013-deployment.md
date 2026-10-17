@@ -1,7 +1,7 @@
 # SPEC-0013: Deployment
 
 Status: reviewed
-Requirements: none yet
+Requirements: R-0017
 Design: [design.md](../design/design.md)
 
 ## Goal

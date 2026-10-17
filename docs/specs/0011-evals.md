@@ -1,7 +1,7 @@
 # SPEC-0011: Evals
 
 Status: reviewed
-Requirements: none yet
+Requirements: R-0015
 Design: [design.md](../design/design.md)
 
 ## Goal

@@ -1,7 +1,7 @@
 # SPEC-0007: API documentation
 
 Status: implemented
-Requirements: none yet
+Requirements: R-0011
 Design: [design.md](../design/design.md)
 
 ## Goal

@@ -1,7 +1,7 @@
 # SPEC-0003: Tool contract
 
 Status: implemented
-Requirements: none yet
+Requirements: R-0007
 Design: [design.md](../design/design.md)
 
 ## Goal
