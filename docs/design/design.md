@@ -44,7 +44,7 @@ back to the model as a `ToolError`.
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|POST /v1/agent/run| api[FastAPI app<br/>src/app.py]
+    client([Client]) -->|POST /v1/agent/run| api[FastAPI app<br/>src/app.py, src/api/]
     client -->|/docs, /redoc| api
     api -->|AgentRequest| runner[Agent runner<br/>src/agent/runner.py]
     runner -->|thread lock, TTL refresh| redis[(Redis 8.2)]
@@ -133,6 +133,35 @@ With `confirm: false`, the graph records ToolError `rejected` for the pending ca
 continues. Sending a `message` while a confirmation is pending, or `confirm` when
 nothing is pending, is a 422 (SPEC-0002 B-0003).
 
+### Agent graph
+The graph has three nodes (`src/agent/graph.py`, SPEC-0001). Each node returns a
+`Command` naming the next node, and the checkpointer saves the state after every
+node, so a run can stop at any point and resume later.
+
+```mermaid
+flowchart TD
+    start([START]) --> model
+    model["model<br/>send build_prompt(state) to the chat model"]
+    model -->|answer| ok([END: ok])
+    model -->|no answer, or invalid<br/>calls twice in a row| error([END: error<br/>model_output_invalid])
+    model -->|calls exceed max_tool_calls| truncated([END: truncated])
+    model -->|calls queued| tools
+    tools["tools<br/>run queued calls in order;<br/>invalid calls get ToolError invalid_input"]
+    tools -->|queue empty| model
+    tools -->|next call has a side effect| confirm
+    confirm["confirm<br/>interrupt with PendingAction"]
+    confirm -.->|"pause: awaiting_confirmation"| client([Client])
+    client -.->|"confirm true / false: Command(resume=...)"| confirm
+    confirm -->|"ran, or ToolError rejected;<br/>more calls queued"| tools
+    confirm -->|queue empty| model
+```
+
+The state carries the thread's `messages`, the `queue` of calls from the latest model
+turn that have not run yet, the run counters (`max_tool_calls`, `calls_used`,
+`trace`, `outcome`, reset on each request) and `invalid_turns`. A paused `confirm`
+keeps its `queue` in the checkpoint, so the calls after it run once the user
+answers. The runner turns the final state into an `AgentResponse`.
+
 ### Data models and storage
 **API** (`src/schemas.py`, SPEC-0002):
 - `AgentRequest`: thread_id, exactly one of `message` / `confirm`, max_tool_calls (1..20).
@@ -184,6 +213,7 @@ to every key containing the thread id (a UUID) after each run.
 ## Alternatives considered
 | Option | Pros | Cons | Why not |
 |--------|------|------|---------|
+| Another agent framework: a hand-written tool loop on the provider SDKs, PydanticAI, a single-provider SDK (OpenAI Agents SDK, Anthropic's tool runner) or LlamaIndex | Fewer dependencies (hand-written); typed agents (PydanticAI); first-party tooling (provider SDKs) | Checkpointing, pause-and-resume and history repair to build ourselves, or no ready-made Redis checkpointer; provider SDKs centre on one vendor's API | LangGraph gives a Redis checkpointer (`langgraph-checkpoint-redis`), `interrupt()` / `Command(resume=…)` for confirmations (SPEC-0001 B-0005), provider-neutral chat models (SPEC-0001 B-0001), and explicit nodes that run on a scripted model in tests |
 | Redis Stack image instead of Redis 8.2 | Long-standing way to get JSON + search | Older line; was pinned to `:latest` | Redis 8+ bundles both modules in the official image |
 | Full checkpointer (`AsyncRedisSaver`) | Keeps history for time travel | More keys per thread; history unused | We only ever resume the latest state |
 | `refresh_on_read` TTL option | No extra code | Measured: earlier runs' keys keep their old countdown | Doesn't meet SPEC-0004 B-0003 |
