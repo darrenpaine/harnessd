@@ -122,6 +122,16 @@ def answer_dangling_calls(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     return repaired
 
 
+def build_prompt(state: AgentState) -> list[BaseMessage]:
+    """What the model is sent: the system prompt, then the thread's history with
+    dangling calls answered. The prompt is built here only, so later specs add to
+    the system prompt in one place."""
+    return [
+        SystemMessage(content=SYSTEM_PROMPT),
+        *answer_dangling_calls(state["messages"]),
+    ]
+
+
 def _call_ids(message: AIMessage) -> list[str]:
     calls = [*message.tool_calls, *message.invalid_tool_calls]
     return [call["id"] for call in calls if call["id"]]
@@ -210,12 +220,8 @@ def build_graph(
 
     async def call_model(state: AgentState) -> Command[str]:
         _step("model")
-        prompt = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            *answer_dangling_calls(state["messages"]),
-        ]
         started = time.perf_counter()
-        reply = await bound.ainvoke(prompt)
+        reply = await bound.ainvoke(build_prompt(state))
         assert isinstance(reply, AIMessage)
         text = str(reply.text).strip()
         calls = reply.tool_calls

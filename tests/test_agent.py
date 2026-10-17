@@ -6,9 +6,15 @@ import json
 import uuid
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent.graph import tool_schema
+from agent.graph import (
+    SYSTEM_PROMPT,
+    AgentState,
+    build_prompt,
+    run_counters,
+    tool_schema,
+)
 from agent.persistence import ThreadBusyError
 from agent_support import PAGE_TEXT, Agent, fetch, tool_turn
 from schemas import FetchSiteCall, WebSearchCall
@@ -158,6 +164,26 @@ async def test_run_timeout_errors(tool_context: ToolContext) -> None:
     assert response.status == "error"
     assert response.error is not None and response.error.code == "internal"
     assert response.answer is None
+
+
+@pytest.mark.spec("SPEC-0001", "B-0007")
+def test_build_prompt() -> None:
+    """System prompt first, then the history, with an unanswered call answered."""
+    question = HumanMessage(content="read a")
+    turn = tool_turn(fetch("a"))
+    state = AgentState(
+        messages=[question, turn], queue=[], invalid_turns=0, **run_counters(5)
+    )
+
+    system, *history = build_prompt(state)
+
+    assert isinstance(system, SystemMessage)
+    assert system.content == SYSTEM_PROMPT
+    assert history[:2] == [question, turn]
+    [result] = history[2:]
+    assert isinstance(result, ToolMessage)
+    assert result.tool_call_id == turn.tool_calls[0]["id"]
+    assert error_code(result) == "internal"
 
 
 @pytest.mark.spec("SPEC-0001", "B-0007", "AT-0010")

@@ -23,7 +23,8 @@ from redisvl.exceptions import RedisSearchError
 from agent.graph import build_graph
 from agent.persistence import lock_key
 from agent_support import Agent, note, tool_turn
-from app import Services, app, get_graph, get_guard
+from api.deps import Services, get_graph, get_guard
+from app import app
 from fakes import RaisingChatModel
 from settings import Settings, get_settings
 from tools import TOOLS
