@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
+import redis.exceptions
 from langgraph.checkpoint.redis.ashallow import AsyncShallowRedisSaver
 from redis.asyncio import Redis
 from redis.exceptions import LockError
@@ -11,6 +12,9 @@ from redis.exceptions import LockError
 from settings import Settings
 
 LOCK_MARGIN_SECONDS = 30
+
+# Redis is unreachable or too slow; the API answers 503 (SPEC-0002 B-0005).
+REDIS_ERRORS = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
 
 
 class ThreadBusyError(Exception):

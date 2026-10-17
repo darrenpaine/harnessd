@@ -16,7 +16,9 @@ from starlette.types import Message, Receive, Scope, Send
 
 from agent.graph import build_graph
 from agent_support import PAGE_TEXT, Agent, LocalThreadGuard, fetch, note, tool_turn
-from app import InternalErrorMiddleware, app, get_graph, get_guard
+from api.deps import get_graph, get_guard
+from api.errors import InternalErrorMiddleware
+from app import app
 from fakes import RaisingChatModel
 from logs import ROOT, clip, configure_logging, event, thread_context
 from settings import LogLevel, Settings, get_settings
