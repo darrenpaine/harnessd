@@ -28,7 +28,7 @@ from api.deps import get_graph, get_guard
 from api.errors import InternalErrorMiddleware
 from app import app
 from fakes import RaisingChatModel
-from logs import ROOT, clip, event, thread_context
+from logs import ROOT, clip, event, log_context
 from settings import LogLevel, Settings, get_settings
 from tools import TOOLS
 from tools.base import ToolContext
@@ -165,13 +165,31 @@ async def test_no_content_or_secrets_logged(
 def test_event_format(capture: Capture, caplog: pytest.LogCaptureFixture) -> None:
     capture("debug")
     log = logging.getLogger(f"{ROOT}.test")
-    with thread_context("t-1"):
+    with log_context(thread="t-1"):
         event(log, logging.INFO, "x.y", n=1, flag=True, text="a b", skipped=None)
     event(log, logging.INFO, "x.z", input=clip({"q": "a" * 500}))
 
     first, second = lines(caplog)
     assert first == 'x.y thread=t-1 n=1 flag=true text="a b"'
     assert len(second.removeprefix("x.z input=")) == 200
+
+
+@pytest.mark.spec("SPEC-0008", "B-0003")
+def test_event_fields_kept_on_record(
+    capture: Capture, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The name and fields stay separate on the record, for other formatters."""
+    capture("info")
+    log = logging.getLogger(f"{ROOT}.test")
+    with log_context(request="r-1"), log_context(thread="t-1"):
+        event(log, logging.INFO, "x.y", n=1, thread="t-2", skipped=None)
+    event(log, logging.INFO, "x.z")
+
+    first, second = [r for r in caplog.records if r.name.startswith(ROOT)]
+    assert first.event == "x.y"  # type: ignore[attr-defined]
+    assert first.fields == {"request": "r-1", "thread": "t-2", "n": 1}  # type: ignore[attr-defined]
+    assert first.getMessage() == "x.y request=r-1 thread=t-2 n=1"
+    assert second.fields == {}  # type: ignore[attr-defined]
 
 
 @pytest.fixture

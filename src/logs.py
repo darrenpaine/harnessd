@@ -1,7 +1,10 @@
 """Log setup and run events (SPEC-0008).
 
-Each event is one line: its name, then `key=value` fields. Lines logged during a
-run carry the run's thread id, taken from a context variable the runner sets.
+Each event is one line: its name, then `key=value` fields. Lines logged inside a
+`log_context` block also carry that block's fields, such as the run's thread id.
+
+The record keeps the event name and fields as attributes (`event`, `fields`) as
+well as in the message, so a formatter other than the text one can use them.
 """
 
 import json
@@ -11,6 +14,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from types import MappingProxyType
 
 from settings import Settings
 
@@ -18,7 +22,9 @@ ROOT = "harnessd"
 HTTP_LOGGERS = ("httpx", "httpcore")
 INPUT_LIMIT = 200
 
-_thread: ContextVar[str | None] = ContextVar("harnessd_thread", default=None)
+_context: ContextVar[MappingProxyType[str, object]] = ContextVar(
+    "harnessd_log_context", default=MappingProxyType({})
+)
 
 
 def get_logger(module: str) -> logging.Logger:
@@ -50,13 +56,14 @@ def configure_logging(settings: Settings) -> None:
 
 
 @contextmanager
-def thread_context(thread_id: str) -> Iterator[None]:
-    """Tag every event logged inside the block with `thread_id` (B-0003)."""
-    token = _thread.set(thread_id)
+def log_context(**fields: object) -> Iterator[None]:
+    """Add `fields` to every event logged inside the block, after any fields of
+    an enclosing block; the runner adds `thread` (B-0003)."""
+    token = _context.set(MappingProxyType({**_context.get(), **fields}))
     try:
         yield
     finally:
-        _thread.reset(token)
+        _context.reset(token)
 
 
 def event(
@@ -69,16 +76,20 @@ def event(
 ) -> None:
     """Log one event line: `name thread=<id> key=value ...`.
 
+    Context fields come first; a field given here replaces one of the same name.
     Fields set to None are left out.
     """
     if not logger.isEnabledFor(level):
         return
-    thread = _thread.get()
-    if thread is not None and "thread" not in fields:
-        fields = {"thread": thread, **fields}
-    parts = [name]
-    parts += [f"{k}={_value(v)}" for k, v in fields.items() if v is not None]
-    logger.log(level, " ".join(parts), exc_info=exc_info)
+    merged = {**_context.get(), **fields}
+    kept = {key: value for key, value in merged.items() if value is not None}
+    parts = [name, *(f"{key}={_value(value)}" for key, value in kept.items())]
+    logger.log(
+        level,
+        " ".join(parts),
+        exc_info=exc_info,
+        extra={"event": name, "fields": kept},
+    )
 
 
 def elapsed_ms(started: float) -> int:
