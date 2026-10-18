@@ -25,7 +25,7 @@ from langgraph.types import StateSnapshot
 
 from agent.graph import AgentGraph, thread_config
 from agent.persistence import ThreadGuard
-from logs import elapsed_ms, event, get_logger, thread_context
+from logs import elapsed_ms, event, get_logger, log_context
 from schemas import (
     CompactResponse,
     PendingAction,
@@ -75,7 +75,7 @@ class ThreadService:
 
     async def read(self, thread_id: UUID) -> ThreadState:
         """B-0001: the latest state, without the lock or a TTL reset."""
-        with thread_context(str(thread_id)):
+        with log_context(thread=str(thread_id)):
             snapshot = await self._snapshot(thread_id)
             pending = snapshot.interrupts
             state = ThreadState(
@@ -93,7 +93,7 @@ class ThreadService:
 
     async def delete(self, thread_id: UUID) -> None:
         """B-0002: remove every checkpoint of the thread, under its lock."""
-        with thread_context(str(thread_id)):
+        with log_context(thread=str(thread_id)):
             async with self.guard.hold(str(thread_id)):
                 await self._snapshot(thread_id)
                 saver = self.graph.checkpointer
@@ -108,7 +108,7 @@ class ThreadService:
         A thread with pending steps is refused: rewriting its state would leave
         those steps behind, and the update would lose the summary.
         """
-        with thread_context(str(thread_id)):
+        with log_context(thread=str(thread_id)):
             started = time.perf_counter()
             async with self.guard.hold(str(thread_id)):
                 snapshot = await self._snapshot(thread_id)

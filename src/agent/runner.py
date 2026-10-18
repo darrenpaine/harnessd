@@ -16,7 +16,7 @@ from langgraph.types import Command
 
 from agent.graph import AgentGraph, RunInput, run_counters, thread_config
 from agent.persistence import ThreadGuard
-from logs import elapsed_ms, event, get_logger, thread_context
+from logs import elapsed_ms, event, get_logger, log_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
 from settings import Settings
 
@@ -43,7 +43,7 @@ class AgentRunner:
         """Run a request to its end. Raises ThreadBusyError and
         ConfirmationStateError; dependency failures propagate."""
         thread_id = request.thread_id or uuid4()
-        with thread_context(str(thread_id)):
+        with log_context(thread=str(thread_id)):
             started = time.perf_counter()
             response = await self._run(request, thread_id)
             _log_end(response, started)
