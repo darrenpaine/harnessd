@@ -308,6 +308,7 @@
               "thread_busy",
               "thread_not_found",
               "thread_awaiting_confirmation",
+              "thread_run_unfinished",
               "dependency_unavailable",
               "internal"
             ],
@@ -1213,7 +1214,7 @@
                 }
               }
             },
-            "description": "A run is in progress, or the thread is awaiting confirmation."
+            "description": "A run is in progress, the thread is awaiting confirmation, or its last run did not finish."
           },
           "422": {
             "content": {

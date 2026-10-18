@@ -16,6 +16,7 @@ from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from redis.asyncio import Redis
 
+from agent.graph import SYSTEM_PROMPT
 from agent.persistence import (
     RedisThreadGuard,
     checkpoint_keys,
@@ -259,7 +260,10 @@ async def test_compact_thread(make_client: MakeClient) -> None:
     await run(client, "five", thread_id)
     system, *history = agent.model.calls[-1]
     assert isinstance(system, SystemMessage)
-    assert "Summary of the earlier conversation: the summary" in str(system.content)
+    # The full system prompt is kept; the summary only follows it.
+    assert system.content == (
+        f"{SYSTEM_PROMPT}\n\nSummary of the earlier conversation: the summary"
+    )
     users = [m.content for m in history if isinstance(m, HumanMessage)]
     assert users == ["four", "five"]
 
@@ -334,11 +338,17 @@ async def test_compact_awaiting_confirmation(make_client: MakeClient) -> None:
     ("failure", "status"), [("timeout", 500), ("provider", 503), ("empty", 500)]
 )
 async def test_compact_failure_leaves_state(
-    make_client: MakeClient, tool_context: ToolContext, failure: str, status: int
+    make_client: MakeClient,
+    tool_context: ToolContext,
+    capture: Capture,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+    status: int,
 ) -> None:
     client, _ = make_client(replies("a", "b"))
     thread_id = await turns(client, "one", "two")
     before = (await client.get(thread(thread_id))).json()
+    capture("info")
     if failure == "timeout":
         fast = tool_context.settings.model_copy(update={"run_timeout_seconds": 0.05})
         app.dependency_overrides[get_settings] = lambda: fast
@@ -355,6 +365,44 @@ async def test_compact_failure_leaves_state(
     expected = "dependency_unavailable" if status == 503 else "internal"
     assert response.json()["error"]["code"] == expected
     assert (await client.get(thread(thread_id))).json() == before
+    warnings = [
+        r.getMessage()
+        for r in caplog.records
+        if r.name.startswith(ROOT) and r.levelno == logging.WARNING
+    ]
+    if failure == "provider":
+        assert not any(w.startswith("thread.compact_failed") for w in warnings)
+    else:
+        assert f"thread.compact_failed thread={thread_id} reason={failure}" in warnings
+
+
+@pytest.mark.spec("SPEC-0009", "B-0011", "AT-0013")
+async def test_compact_unfinished_run(
+    make_client: MakeClient, tool_context: ToolContext
+) -> None:
+    client, agent = make_client(replies("one", "two", "the summary", "three"))
+    thread_id = await run(client, "first")
+    fast = tool_context.settings.model_copy(update={"run_timeout_seconds": 0.1})
+    app.dependency_overrides[get_settings] = lambda: fast
+    agent.model.delay = 1
+    timed_out = await client.post(RUN, json={"thread_id": thread_id, "message": "slow"})
+    assert timed_out.json()["status"] == "error"
+    agent.model.delay = 0
+    before = (await client.get(thread(thread_id))).json()
+    compact = thread(thread_id, "/compact")
+
+    refused = await client.post(compact, json={"keep_turns": 1})
+
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "thread_run_unfinished"
+    assert (await client.get(thread(thread_id))).json() == before
+
+    await run(client, "again", thread_id)
+    done = await client.post(compact, json={"keep_turns": 1})
+    assert done.status_code == 200 and done.json()["compacted"] is True
+    await run(client, "after", thread_id)
+    system = agent.model.calls[-1][0]
+    assert str(system.content).endswith("earlier conversation: the summary")
 
 
 @pytest.mark.spec("SPEC-0009", "B-0009", "AT-0012")

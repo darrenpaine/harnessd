@@ -68,7 +68,7 @@ yet written.
 | `src/app.py` | Builds the FastAPI app: Swagger/ReDoc metadata, lifespan (logging, `Services`), error handlers and the routers. | SPEC-0002, SPEC-0007 | built |
 | `src/api/agent.py`, `src/api/threads.py`, `src/api/health.py` | One `APIRouter` per area: `POST /v1/agent/run` (turns `ConfirmationStateError` into 422); `GET`/`DELETE /v1/threads/{id}` and `POST /v1/threads/{id}/compact`; `GET /health`. | SPEC-0002, SPEC-0009 | built |
 | `src/api/deps.py` | `Services` builds the Redis client, chat model and graph on first use, so the app starts while Redis is down. Dependencies `get_settings` → `get_graph` / `get_guard` / `get_model` → `get_runner` / `get_threads`; tests override the graph, guard and model. | SPEC-0002, SPEC-0009 | built |
-| `src/api/errors.py` | Exception handlers: `ThreadBusyError` and `ThreadAwaitingConfirmationError` → 409, `ThreadNotFoundError` → 404, `SummaryError` → 500, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
+| `src/api/errors.py` | Exception handlers: `ThreadBusyError`, `ThreadAwaitingConfirmationError` and `ThreadRunUnfinishedError` → 409, `ThreadNotFoundError` → 404, `SummaryError` → 500, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
@@ -213,7 +213,8 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 | fetch_site URL (or redirect) points at a non-public address | ToolError `invalid_input` | SPEC-0003 B-0006 |
 | Thread id unknown or expired | new thread with that id; 404 `thread_not_found` on the thread endpoints | SPEC-0004 B-0002, SPEC-0009 B-0001 |
 | Compacting a thread awaiting confirmation | 409 `thread_awaiting_confirmation` | SPEC-0009 B-0007 |
-| Summary call times out or returns no text | 500 `internal`, state unchanged (a provider error is a 503) | SPEC-0009 B-0008 |
+| Compacting a thread whose last run timed out mid-step | 409 `thread_run_unfinished`; the next message finishes it | SPEC-0009 B-0011 |
+| Summary call times out or returns no text | 500 `internal`, `thread.compact_failed` warning, state unchanged (a provider error is a 503) | SPEC-0009 B-0008 |
 | Redis lacks the JSON/search modules | `redis` tests skip locally / fail in CI with a clear reason | SPEC-0005 B-0003 |
 
 ## Alternatives considered

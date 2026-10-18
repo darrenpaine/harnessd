@@ -369,6 +369,7 @@ ApiErrorCode = Literal[
     "thread_busy",
     "thread_not_found",
     "thread_awaiting_confirmation",
+    "thread_run_unfinished",
     "dependency_unavailable",
     "internal",
 ]

@@ -53,7 +53,8 @@ async def delete_thread(thread_id: ThreadId, threads: Threads) -> None:
     responses=error_responses(
         {
             404: NOT_FOUND,
-            409: "A run is in progress, or the thread is awaiting confirmation.",
+            409: "A run is in progress, the thread is awaiting confirmation, "
+            "or its last run did not finish.",
             500: "The summary call timed out or returned no text.",
             503: UNAVAILABLE,
         }

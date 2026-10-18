@@ -52,6 +52,10 @@ class ThreadAwaitingConfirmationError(Exception):
     """A paused thread cannot be compacted (B-0007)."""
 
 
+class ThreadRunUnfinishedError(Exception):
+    """The last run stopped part way, with graph steps pending (B-0011)."""
+
+
 class SummaryError(Exception):
     """The summary call timed out or returned no text (B-0008)."""
 
@@ -98,14 +102,20 @@ class ThreadService:
             event(log, logging.INFO, "thread.deleted")
 
     async def compact(self, thread_id: UUID, keep_turns: int) -> CompactResponse:
-        """B-0004, B-0006, B-0007: replace all but the last `keep_turns` turns
-        with a summary. The state changes only once the summary is written."""
+        """B-0004, B-0006, B-0007, B-0011: replace all but the last `keep_turns`
+        turns with a summary. The state changes only once the summary is written.
+
+        A thread with pending steps is refused: rewriting its state would leave
+        those steps behind, and the update would lose the summary.
+        """
         with thread_context(str(thread_id)):
             started = time.perf_counter()
             async with self.guard.hold(str(thread_id)):
                 snapshot = await self._snapshot(thread_id)
                 if snapshot.interrupts:
                     raise ThreadAwaitingConfirmationError(str(thread_id))
+                if snapshot.next:
+                    raise ThreadRunUnfinishedError(str(thread_id))
                 messages: list[BaseMessage] = snapshot.values["messages"]
                 summary: str | None = snapshot.values.get("summary")
                 removed = messages[: compaction_cut(messages, keep_turns)]
@@ -151,11 +161,18 @@ class ThreadService:
             async with asyncio.timeout(limit):
                 reply = await self.model.ainvoke(prompt)
         except TimeoutError as exc:
+            _summary_failed("timeout")
             raise SummaryError(f"the summary took longer than {limit:g} s") from exc
         text = str(reply.text).strip()
         if not text:
+            _summary_failed("empty")
             raise SummaryError("the model returned an empty summary")
         return text
+
+
+def _summary_failed(reason: str) -> None:
+    """thread.compact_failed (B-0008, SPEC-0008)."""
+    event(log, logging.WARNING, "thread.compact_failed", reason=reason)
 
 
 def compaction_cut(messages: Sequence[BaseMessage], keep_turns: int) -> int:

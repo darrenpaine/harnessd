@@ -28,6 +28,7 @@ from agent.threads import (
     SummaryError,
     ThreadAwaitingConfirmationError,
     ThreadNotFoundError,
+    ThreadRunUnfinishedError,
 )
 from api.deps import app_settings
 from logs import event, get_logger
@@ -98,6 +99,14 @@ async def thread_awaiting_confirmation(
     )
 
 
+async def thread_run_unfinished(request: Request, exc: Exception) -> JSONResponse:
+    return api_error(
+        409,
+        "thread_run_unfinished",
+        "the thread's last run did not finish; send a message first",
+    )
+
+
 async def summary_failed(request: Request, exc: Exception) -> JSONResponse:
     """SPEC-0009 B-0008: our own fixed text, so no provider detail leaks."""
     return api_error(500, "internal", str(exc))
@@ -138,6 +147,7 @@ def add_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(
         ThreadAwaitingConfirmationError, thread_awaiting_confirmation
     )
+    app.add_exception_handler(ThreadRunUnfinishedError, thread_run_unfinished)
     app.add_exception_handler(SummaryError, summary_failed)
     for redis_error in REDIS_ERRORS:
         app.add_exception_handler(redis_error, redis_unavailable)
