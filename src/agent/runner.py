@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
-from agent.graph import AgentGraph, RunInput, run_counters
+from agent.graph import AgentGraph, RunInput, run_counters, thread_config
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, thread_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
@@ -50,7 +50,7 @@ class AgentRunner:
             return response
 
     async def _run(self, request: AgentRequest, thread_id: UUID) -> AgentResponse:
-        config: RunnableConfig = {"configurable": {"thread_id": str(thread_id)}}
+        config = thread_config(thread_id)
         async with self.guard.hold(str(thread_id)):
             graph_input = await self._input(request, config)
             try:

@@ -20,11 +20,10 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import StateSnapshot
 
-from agent.graph import AgentGraph
+from agent.graph import AgentGraph, thread_config
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, thread_context
 from schemas import (
@@ -116,7 +115,7 @@ class ThreadService:
                         "messages": [RemoveMessage(id=m.id or "") for m in removed],
                         "summary": summary,
                     }
-                    await self.graph.aupdate_state(_config(thread_id), update)
+                    await self.graph.aupdate_state(thread_config(thread_id), update)
                     await self.guard.touch(str(thread_id))
             event(
                 log,
@@ -133,7 +132,7 @@ class ThreadService:
             )
 
     async def _snapshot(self, thread_id: UUID) -> StateSnapshot:
-        snapshot = await self.graph.aget_state(_config(thread_id))
+        snapshot = await self.graph.aget_state(thread_config(thread_id))
         if not snapshot.values:
             raise ThreadNotFoundError(str(thread_id))
         return snapshot
@@ -157,10 +156,6 @@ class ThreadService:
         if not text:
             raise SummaryError("the model returned an empty summary")
         return text
-
-
-def _config(thread_id: UUID) -> RunnableConfig:
-    return {"configurable": {"thread_id": str(thread_id)}}
 
 
 def compaction_cut(messages: Sequence[BaseMessage], keep_turns: int) -> int:

@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
+from uuid import UUID
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -15,6 +16,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.messages.tool import ToolCall
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -72,6 +74,12 @@ class AgentState(RunInput):
 
 
 AgentGraph = CompiledStateGraph[AgentState, None, RunInput]
+
+
+def thread_config(thread_id: UUID) -> RunnableConfig:
+    """The config that selects a thread's checkpoint; runs and the thread
+    endpoints both use it, so they always read the same state."""
+    return {"configurable": {"thread_id": str(thread_id)}}
 
 
 def run_counters(max_tool_calls: int) -> RunCounters:
@@ -136,9 +144,10 @@ def build_prompt(state: AgentState) -> list[BaseMessage]:
     dangling calls answered. The prompt is built here only, so later specs add to
     the system prompt in one place.
 
-    A compacted thread's summary goes in the system prompt, never in a user or
-    assistant message, so the history stays valid for every provider
-    (SPEC-0009 B-0005).
+    A compacted thread's summary is appended after the full system prompt,
+    never in a user or assistant message, so the history stays valid for every
+    provider (SPEC-0009 B-0005). Only the summary is stored with the thread; the
+    system prompt comes from the code on every call and is never summarised.
     """
     system = SYSTEM_PROMPT
     if summary := state.get("summary"):
