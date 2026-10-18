@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["ollama", "anthropic", "google"]
 LogLevel = Literal["debug", "info", "warning", "error"]
+LogFormat = Literal["text", "json"]
 
 
 class Settings(BaseSettings):
@@ -32,8 +33,19 @@ class Settings(BaseSettings):
     run_timeout_seconds: float = Field(default=60, gt=0)  # SPEC-0001 B-0006
     checkpoint_ttl_hours: float = Field(default=24, gt=0)  # SPEC-0004 B-0003
     log_level: LogLevel = "info"  # SPEC-0008 B-0001
+    log_format: LogFormat = "text"  # SPEC-0010 B-0008
 
-    @field_validator("log_level", mode="before")
+    # Tracing (SPEC-0010)
+    tracing_enabled: bool = False
+    langfuse_host: str = "http://localhost:3000"
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    # Standard OTel variables; when set they replace the Langfuse values.
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_headers: SecretStr | None = None
+    trace_content: bool = True
+
+    @field_validator("log_level", "log_format", mode="before")
     @classmethod
     def _lower_log_level(cls, value: object) -> object:
         return value.lower() if isinstance(value, str) else value
@@ -46,6 +58,17 @@ class Settings(BaseSettings):
             )
         if self.llm_provider == "google" and self.google_api_key is None:
             raise ValueError("GOOGLE_API_KEY is required when LLM_PROVIDER=google")
+        return self
+
+    @model_validator(mode="after")
+    def _tracing_target_set(self) -> Self:
+        """SPEC-0010 B-0009: tracing needs Langfuse keys or an OTLP endpoint."""
+        keys = self.langfuse_public_key and self.langfuse_secret_key
+        if self.tracing_enabled and not keys and not self.otel_exporter_otlp_endpoint:
+            raise ValueError(
+                "TRACING_ENABLED=true needs LANGFUSE_PUBLIC_KEY and "
+                "LANGFUSE_SECRET_KEY, or OTEL_EXPORTER_OTLP_ENDPOINT"
+            )
         return self
 
 

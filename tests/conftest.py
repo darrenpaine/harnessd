@@ -17,13 +17,23 @@ from logs import ROOT, configure_logging
 from settings import LogLevel, Settings, get_settings
 from tools.base import ToolContext
 
-SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "TAVILY_API_KEY")
+SECRET_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "TAVILY_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+)
+# Local settings that would change what tests see (SPEC-0010).
+LOCAL_ENV_VARS = ("TRACING_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "LOG_FORMAT")
 
 
 @pytest.fixture(autouse=True)
 def _clear_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test may depend on a real API key (SPEC-0005 B-0001)."""
-    for name in SECRET_ENV_VARS:
+    """No test may depend on a real API key (SPEC-0005 B-0001) or on local
+    tracing and log settings."""
+    for name in (*SECRET_ENV_VARS, *LOCAL_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
 
 
