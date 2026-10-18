@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 from collections import defaultdict
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -17,10 +17,17 @@ from agent.persistence import ThreadBusyError, ThreadGuard
 from agent.runner import AgentRunner
 from fakes import ScriptedChatModel
 from schemas import AgentRequest, AgentResponse
+from settings import LogLevel
 from tools import TOOLS
 from tools.base import ToolContext
 
 PAGE_TEXT = "page text"
+
+# The `capture` fixture: configure logging at a level and route it to caplog.
+Capture = Callable[[LogLevel], None]
+
+# The `make_client` fixture: (scripted replies, Agent options) -> (client, agent).
+MakeClient = Callable[..., tuple[httpx.AsyncClient, "Agent"]]
 
 
 class LocalThreadGuard:
@@ -39,6 +46,9 @@ class LocalThreadGuard:
 
     async def touch(self, thread_id: str) -> None:
         pass  # in-memory state does not expire
+
+    async def expires_in(self, thread_id: str) -> int | None:
+        return None
 
 
 def tool_turn(*calls: tuple[str, dict[str, Any]], text: str = "") -> AIMessage:

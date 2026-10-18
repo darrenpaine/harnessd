@@ -1,6 +1,6 @@
 """Redis checkpointing, checkpoint TTL and the per-thread run lock (SPEC-0004)."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
@@ -32,6 +32,10 @@ class ThreadGuard(Protocol):
         """Reset the thread's expiry after a run."""
         ...
 
+    async def expires_in(self, thread_id: str) -> int | None:
+        """Seconds until the thread expires, or None if it does not."""
+        ...
+
 
 def ttl_config(settings: Settings) -> dict[str, Any]:
     """Checkpointer TTL settings; the library counts in minutes."""
@@ -54,17 +58,34 @@ async def open_checkpointer(
         yield saver
 
 
+async def checkpoint_keys(redis: Redis, thread_id: str) -> AsyncIterator[bytes]:
+    """Every checkpointer key of a thread; the thread's lock key is left out.
+
+    Thread ids are UUIDs, so matching on the id cannot find another thread's keys.
+    """
+    lock = lock_key(thread_id).encode()
+    async for key in redis.scan_iter(match=f"*{thread_id}*", count=1000):
+        if key != lock:
+            yield key
+
+
 async def refresh_thread_ttl(redis: Redis, thread_id: str, seconds: int) -> int:
     """Reset the TTL on every checkpoint key of a thread (SPEC-0004 B-0003).
 
     The checkpointer sets a TTL only on keys it writes in a run, so keys from
-    earlier runs would expire first. Thread ids are UUIDs, so matching on the
-    id cannot touch another thread's keys. Returns the number of keys updated.
+    earlier runs would expire first. Returns the number of keys updated.
     """
     count = 0
-    async for key in redis.scan_iter(match=f"*{thread_id}*", count=1000):
+    async for key in checkpoint_keys(redis, thread_id):
         count += int(await redis.expire(key, seconds))
     return count
+
+
+async def thread_expiry(redis: Redis, thread_id: str) -> int | None:
+    """Seconds until the thread's first key expires; None if no key expires."""
+    ttls = [await redis.ttl(key) async for key in checkpoint_keys(redis, thread_id)]
+    expiring = [ttl for ttl in ttls if ttl >= 0]
+    return min(expiring) if expiring else None
 
 
 def lock_key(thread_id: str) -> str:
@@ -108,3 +129,6 @@ class RedisThreadGuard:
 
     async def touch(self, thread_id: str) -> None:
         await refresh_thread_ttl(self.redis, thread_id, ttl_seconds(self.settings))
+
+    async def expires_in(self, thread_id: str) -> int | None:
+        return await thread_expiry(self.redis, thread_id)

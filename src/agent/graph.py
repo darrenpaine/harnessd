@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
+from uuid import UUID
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -15,6 +16,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.messages.tool import ToolCall
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -58,11 +60,26 @@ class RunCounters(TypedDict):
     outcome: Outcome | None
 
 
-class AgentState(RunCounters):
+class RunInput(RunCounters):
+    """What a new message starts a run with; it never carries the summary."""
+
     messages: Annotated[list[AnyMessage], add_messages]
     # Carried across a confirmation pause:
     queue: list[ToolCall]  # calls from the latest model turn not yet run
     invalid_turns: int  # model turns in a row with an invalid call
+
+
+class AgentState(RunInput):
+    summary: NotRequired[str | None]  # written by compaction (SPEC-0009 B-0004)
+
+
+AgentGraph = CompiledStateGraph[AgentState, None, RunInput]
+
+
+def thread_config(thread_id: UUID) -> RunnableConfig:
+    """The config that selects a thread's checkpoint; runs and the thread
+    endpoints both use it, so they always read the same state."""
+    return {"configurable": {"thread_id": str(thread_id)}}
 
 
 def run_counters(max_tool_calls: int) -> RunCounters:
@@ -125,9 +142,18 @@ def answer_dangling_calls(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
 def build_prompt(state: AgentState) -> list[BaseMessage]:
     """What the model is sent: the system prompt, then the thread's history with
     dangling calls answered. The prompt is built here only, so later specs add to
-    the system prompt in one place."""
+    the system prompt in one place.
+
+    A compacted thread's summary is appended after the full system prompt,
+    never in a user or assistant message, so the history stays valid for every
+    provider (SPEC-0009 B-0005). Only the summary is stored with the thread; the
+    system prompt comes from the code on every call and is never summarised.
+    """
+    system = SYSTEM_PROMPT
+    if summary := state.get("summary"):
+        system += f"\n\nSummary of the earlier conversation: {summary}"
     return [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=system),
         *answer_dangling_calls(state["messages"]),
     ]
 
@@ -214,7 +240,7 @@ def build_graph(
     ctx: ToolContext,
     tools: Tools,
     checkpointer: BaseCheckpointSaver[Any],
-) -> CompiledStateGraph[AgentState]:
+) -> AgentGraph:
     """Compile the agent loop with its checkpointer."""
     bound = model.bind_tools([tool_schema(tool) for tool in tools.values()])
 
@@ -314,7 +340,7 @@ def build_graph(
         }
         return Command(update=update, goto="tools" if rest else "model")
 
-    graph = StateGraph(AgentState)
+    graph = StateGraph(AgentState, input_schema=RunInput)
     graph.add_node("model", call_model, destinations=("tools", END))
     graph.add_node("tools", run_tools, destinations=("model", "confirm"))
     graph.add_node("confirm", confirm, destinations=("model", "tools"))

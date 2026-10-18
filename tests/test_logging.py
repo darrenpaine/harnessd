@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 import logging
-from collections.abc import AsyncGenerator, Callable, Iterator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import httpx
@@ -15,40 +15,25 @@ from pydantic import SecretStr, ValidationError
 from starlette.types import Message, Receive, Scope, Send
 
 from agent.graph import build_graph
-from agent_support import PAGE_TEXT, Agent, LocalThreadGuard, fetch, note, tool_turn
+from agent_support import (
+    PAGE_TEXT,
+    Agent,
+    Capture,
+    LocalThreadGuard,
+    fetch,
+    note,
+    tool_turn,
+)
 from api.deps import get_graph, get_guard
 from api.errors import InternalErrorMiddleware
 from app import app
 from fakes import RaisingChatModel
-from logs import ROOT, clip, configure_logging, event, thread_context
+from logs import ROOT, clip, event, thread_context
 from settings import LogLevel, Settings, get_settings
 from tools import TOOLS
 from tools.base import ToolContext
 
 RUN = "/v1/agent/run"
-
-Capture = Callable[[LogLevel], None]
-
-
-@pytest.fixture
-def capture(caplog: pytest.LogCaptureFixture) -> Iterator[Capture]:
-    """Configure logging at a level and route `harnessd` logs to caplog."""
-    root = logging.getLogger(ROOT)
-    saved = (root.level, root.propagate, list(root.handlers))
-    http = {name: logging.getLogger(name).level for name in ("httpx", "httpcore")}
-
-    def configure(level: LogLevel) -> None:
-        configure_logging(Settings(_env_file=None, log_level=level))  # type: ignore[call-arg]
-        if caplog.handler not in root.handlers:
-            root.addHandler(caplog.handler)
-        caplog.handler.setLevel(logging.DEBUG)
-
-    yield configure
-    root.setLevel(saved[0])
-    root.propagate = saved[1]
-    root.handlers[:] = saved[2]
-    for name, level in http.items():
-        logging.getLogger(name).setLevel(level)
 
 
 def lines(caplog: pytest.LogCaptureFixture) -> list[str]:

@@ -33,6 +33,7 @@ step, each tool call, and how it ends. Message text and secrets are never logged
 | `confirm.decision` | info | thread, tool, approved |
 | `run.end` | info | thread, status, tool_calls, ms; plus error code when status is error |
 | `thread.busy` | warning | thread |
+| `thread.compact_failed` | warning | thread, reason (`timeout` \| `empty`) (SPEC-0009 B-0008) |
 | `dependency.unavailable` | warning | cause (the 503 message, SPEC-0002 B-0005, B-0007) |
 | `request.failed` | error | the exception with its traceback (SPEC-0002 B-0008) |
 | `thread.*` | info | the thread endpoint events in SPEC-0009 |

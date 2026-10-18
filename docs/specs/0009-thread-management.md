@@ -1,6 +1,6 @@
 # SPEC-0009: Thread management
 
-Status: reviewed
+Status: implemented
 Requirements: R-0010, R-0027
 Design: [design.md](../design/design.md)
 
@@ -21,8 +21,8 @@ documented like the other operations (SPEC-0007 B-0003, B-0004) under the tag
 | `POST /v1/threads/{thread_id}/compact` | `compact_thread` | 200 CompactResponse | 404, 409, 422, 503, 500 |
 
 404 and 409 use the ApiError body (SPEC-0002) with codes `thread_not_found`,
-`thread_busy` and `thread_awaiting_confirmation`; the first and last are new
-ApiErrorCode values. 503 and 500 are as in SPEC-0002 B-0005, B-0007 and B-0008.
+`thread_busy`, `thread_awaiting_confirmation` and `thread_run_unfinished`; all but
+`thread_busy` are new ApiErrorCode values. 503 and 500 are as in SPEC-0002 B-0005, B-0007 and B-0008.
 
 ### ThreadState
 - thread_id: UUID
@@ -69,7 +69,8 @@ The system prompt and the run counters (calls used, queued calls) are not return
   removal stops at a turn boundary.
 - B-0005: On later runs the summary is sent to the model as part of the system
   prompt ("Summary of the earlier conversation: …"), never as a user or assistant
-  message, so the history stays valid for every provider.
+  message, so the history stays valid for every provider. It is appended after the
+  full system prompt, which is never summarised or stored with the thread.
 - B-0006: If the thread has no more than `keep_turns` turns, `compact` makes no
   model call and returns 200 with compacted=false and the state unchanged.
 - B-0007: A thread awaiting confirmation cannot be compacted: 409 with code
@@ -77,9 +78,15 @@ The system prompt and the run counters (calls used, queued calls) are not return
   call the confirmation resumes.)
 - B-0008: The summarising call is limited by `RUN_TIMEOUT_SECONDS`. If it times out,
   fails or returns no text, the state is unchanged; a timeout or empty reply → 500
-  `internal`, a provider error → 503 as in SPEC-0002.
+  `internal`, a provider error → 503 as in SPEC-0002. A timeout or empty reply
+  also logs `thread.compact_failed` at warning with reason `timeout` or `empty`
+  (SPEC-0008).
 - B-0009: Each endpoint logs one info event (SPEC-0008): `thread.read`,
   `thread.deleted`, `thread.compacted` (messages_removed, ms).
+- B-0011: A thread whose last run stopped part way (it timed out between graph
+  steps, so steps are still pending) cannot be compacted: 409 with code
+  `thread_run_unfinished` and the state unchanged. The next message runs the
+  thread to its end, after which it can be compacted.
 - B-0010: The three operations are documented as SPEC-0007 B-0003 and B-0004
   require, under the tag `threads`, and `docs/openapi.json` is regenerated
   (SPEC-0007 B-0006).
@@ -102,8 +109,8 @@ use real Redis (SPEC-0005).
   `thread_busy` and the state is unchanged. -> `tests/test_threads.py::test_busy_thread_409`
 - AT-0006 (B-0004, B-0005): A thread with 4 turns, compact with keep_turns=1 →
   compacted=true, 3 turns' messages removed, GET shows the summary and the last
-  turn; the next run's model call gets a system prompt containing the summary and
-  no removed message. -> `tests/test_threads.py::test_compact_thread`
+  turn; the next run's model call gets the full system prompt followed by the
+  summary, and no removed message. -> `tests/test_threads.py::test_compact_thread`
 - AT-0007 (B-0004): Compacting twice → the second summary call receives the first
   summary. -> `tests/test_threads.py::test_compact_includes_previous_summary`
 - AT-0008 (B-0006): A 1-turn thread with keep_turns=2 → compacted=false, the model is
@@ -111,8 +118,16 @@ use real Redis (SPEC-0005).
 - AT-0009 (B-0007): compact on a thread awaiting confirmation → 409
   `thread_awaiting_confirmation`. -> `tests/test_threads.py::test_compact_awaiting_confirmation`
 - AT-0010 (B-0008): The summary model times out, raises a provider error, or returns
-  empty text → 500 / 503 / 500 and GET shows the state unchanged.
+  empty text → 500 / 503 / 500 and GET shows the state unchanged; the timeout and
+  empty cases log thread.compact_failed at warning.
   -> `tests/test_threads.py::test_compact_failure_leaves_state`
+- AT-0012 (B-0009): GET, DELETE and compact each log their info event with the
+  thread id; `thread.compacted` has messages_removed and ms.
+  -> `tests/test_threads.py::test_thread_events_logged`
+- AT-0013 (B-0011): A run that times out during its model call leaves steps
+  pending; compact → 409 `thread_run_unfinished` with the state unchanged; after the
+  next message completes, compact succeeds and the following run's system prompt
+  holds the summary. -> `tests/test_threads.py::test_compact_unfinished_run`
 - AT-0011 (B-0010): The OpenAPI schema lists the three operations with the
   documented responses. -> `tests/test_api_docs.py::test_operations_documented`
 
