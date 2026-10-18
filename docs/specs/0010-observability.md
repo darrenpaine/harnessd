@@ -18,9 +18,12 @@ Everything runs locally on open-source software; tracing is off unless configure
   The cost is a heavy local stack (Postgres, ClickHouse, Redis, MinIO; plan for
   several GB of RAM), so it runs as an optional compose profile, never in CI.
 - **Instrumentation: OpenTelemetry (OTLP export).** OTel is the cross-vendor
-  standard for traces. The code emits standard spans with GenAI semantic-convention
-  attributes and does not import a Langfuse SDK. Langfuse, Phoenix, Opik and Jaeger
-  all accept OTLP, so the backend is a setting, not a code change. This matches the
+  standard for traces. LangChain and LangGraph calls are traced by
+  `openinference-instrumentation-langchain`, whose OpenInference attributes
+  (`llm.model_name`, `llm.token_count.*`, input and output messages) Langfuse,
+  Phoenix and Opik all read. The code adds its own spans for the run, tool calls
+  and confirmations, and does not import a Langfuse SDK. Langfuse, Phoenix, Opik
+  and Jaeger all accept OTLP, so the backend is a setting, not a code change. This matches the
   provider-agnostic model layer (SPEC-0001 B-0001), and it is the approach most
   teams would recognise.
 
@@ -47,17 +50,27 @@ Everything runs locally on open-source software; tracing is off unless configure
 
 ### Span tree (one trace per HTTP request)
 ```
-POST /v1/agent/run                 server span (FastAPI instrumentation)
-└─ agent.run                       thread, kind, max_tool_calls, status, tool_calls
-   ├─ agent.model                  one per model node; gen_ai.* attributes
-   │  └─ chat <model>              the LLM call: gen_ai.request.model, gen_ai.usage.input_tokens / output_tokens
-   ├─ agent.tool <name>            call_id, result (ok | ToolError code)
-   └─ agent.confirm                tool, approved | awaiting
+POST /v1/agent/run              server span (FastAPI instrumentation); request_id
+└─ agent.run                    session.id, thread, kind, max_tool_calls, status, tool_calls, error
+   └─ LangGraph                 the graph run (OpenInference CHAIN span)
+      ├─ model                  model node (CHAIN), one per model turn
+      │  └─ <chat model class>  the LLM call (OpenInference LLM span, e.g. ChatOllama):
+      │                         llm.provider, llm.model_name, llm.token_count.prompt /
+      │                         completion / total, input and output messages
+      ├─ tools                  tools node (CHAIN)
+      │  └─ agent.tool <name>   call_id, result (ok | ToolError code); input and output
+      └─ confirm                confirm node (CHAIN)
+         └─ agent.confirm       tool, decision (awaiting | approved | rejected)
 ```
-- `session.id` = thread_id on `agent.run`, so Langfuse groups a conversation's
-  traces as one session. `user.id` is not set (no auth).
+- Spans named `agent.*` are ours; `LangGraph`, the node spans and the LLM span come
+  from OpenInference, so their names follow the graph and the chat model class.
+- `session.id` = thread_id on `agent.run` (OpenInference also sets it on its
+  spans), so Langfuse groups a conversation's traces as one session. `user.id` is
+  not set (no auth).
+- A confirmation pause ends the trace normally: `agent.confirm` has decision
+  `awaiting` and `agent.run` has status `awaiting_confirmation`.
 - The thread endpoints (SPEC-0009) get `thread.read`, `thread.delete` and
-  `thread.compact` spans; compaction's summarising call is a `chat` span under it.
+  `thread.compact` spans; compaction's summarising call is an LLM span under it.
 
 ### Correlation ids
 - `request_id`: from the `X-Request-ID` request header if it is 1-128 characters of
@@ -85,8 +98,9 @@ Same events and fields as the text format (SPEC-0008); only the encoding differs
   the span tree above. Errored tool calls, truncation, timeouts and 409/422/503/500
   responses are recorded as span status and attributes, never dropped.
 - B-0003: LLM spans carry the model name and the input and output token counts the
-  provider reports. When the provider reports none, the attributes are omitted, not
-  set to zero.
+  provider reports, as OpenInference attributes (`llm.model_name`,
+  `llm.token_count.prompt`, `llm.token_count.completion`). When the provider
+  reports none, the attributes are omitted, not set to zero.
 - B-0004: With `TRACE_CONTENT=false`, no span holds message text, model replies or
   tool inputs and outputs. API keys never appear on spans in either mode.
 - B-0005: Exporting is asynchronous (batch processor). If the backend is down or
@@ -108,8 +122,9 @@ All use an in-memory span exporter and a scripted fake model; none need Langfuse
 - AT-0001 (B-0001): Tracing off → a run records no spans.
   -> `tests/test_tracing.py::test_tracing_off_records_nothing`
 - AT-0002 (B-0002, B-0003): A run with one tool call → spans server → agent.run →
-  agent.model → chat, agent.tool, agent.model → chat; token counts from the fake
-  model's usage metadata are on the chat spans; session.id is the thread id.
+  LangGraph → model → LLM span, tools → agent.tool, model → LLM span; token counts
+  from the fake model's usage metadata are on the LLM spans, and absent from a
+  reply without usage; session.id on agent.run is the thread id.
   -> `tests/test_tracing.py::test_run_span_tree`
 - AT-0003 (B-0002): A run that times out, and a 503 → spans have error status and
   the error code. -> `tests/test_tracing.py::test_failures_recorded`
@@ -135,9 +150,11 @@ alerting, user identity on traces, Langfuse prompt management.
 
 ## Open questions
 None. Settled in review:
-- LLM `chat` spans come from `openinference-instrumentation-langchain` (Apache 2.0),
+- LLM spans come from `openinference-instrumentation-langchain` (Apache 2.0),
   which hooks LangChain's callbacks so every model call is captured without code in
-  the graph, and whose attributes Langfuse maps. Dependencies to add at
+  the graph, and whose attributes Langfuse maps. It also traces the graph and its
+  nodes, so the tree uses its span names rather than our own `agent.model`;
+  `TRACE_CONTENT=false` maps to its hide-inputs and hide-outputs settings. Dependencies to add at
   implementation: `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`,
   `opentelemetry-instrumentation-fastapi`, `openinference-instrumentation-langchain`.
 - `TRACE_CONTENT` defaults to `true`: seeing the exact prompt and reply is the main
