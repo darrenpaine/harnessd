@@ -373,7 +373,8 @@ async def test_compact_failure_leaves_state(
     if failure == "provider":
         assert not any(w.startswith("thread.compact_failed") for w in warnings)
     else:
-        assert f"thread.compact_failed thread={thread_id} reason={failure}" in warnings
+        [failed] = [w for w in warnings if w.startswith("thread.compact_failed ")]
+        assert f" thread={thread_id} reason={failure}" in failed
 
 
 @pytest.mark.spec("SPEC-0009", "B-0011", "AT-0013")

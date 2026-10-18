@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from api import agent, health, threads
 from api.deps import Services, app_settings
 from api.errors import add_error_handlers
+from api.request_id import RequestIdMiddleware
 from logs import configure_logging
 
 SPECS_URL = "https://github.com/darrenpaine/harnessd/blob/main/docs/specs/README.md"
@@ -54,6 +55,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 add_error_handlers(app)
+app.add_middleware(RequestIdMiddleware)  # outside the error handling
 app.include_router(agent.router)
 app.include_router(threads.router)
 app.include_router(health.router)
