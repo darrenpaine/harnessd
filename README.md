@@ -13,6 +13,49 @@ validated, structured responses. Conversation state is checkpointed in Redis.
 Gemini and local Ollama models.
 - Specs live in `docs/specs/`; see the [spec index](docs/specs/README.md).
 
+## Example call to harnessd backend
+- Run docker compose with `TAVILY_API_KEY` and a model provider set in `.env`
+  (see [Setup](#setup)).
+- Call the `/v1/agent/run` endpoint with the message
+  `"Add a note about the weather at Santa's House."`. You can also do this from the
+  OpenAPI docs at `http://localhost:5999/docs`.
+
+```bash
+curl -X 'POST' 'http://localhost:5999/v1/agent/run' \
+  -H 'accept: application/json' -H 'Content-Type: application/json' \
+  -d '{
+  "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c11",
+  "message":  "Add a note about the weather at Santa'\''s House.",
+  "max_tool_calls": 5
+}'
+```
+
+- The agent calls `web_search` twice (where does Santa live? what is the weather
+  there?), then asks the user to confirm the `add_note` call. The response has
+  `status: "awaiting_confirmation"` and the note in `pending_action`. Some fields are
+  collapsed in the screenshot; click it to see it full size.
+
+<a href="docs/images/call_to_add_note_on_weather_at_santas_house.png"><img src="docs/images/call_to_add_note_on_weather_at_santas_house.png" alt="Response awaiting confirmation: two web_search calls and a pending add_note action" width="420"></a>
+
+- The user sends a confirmation:
+
+```bash
+curl -X 'POST' 'http://localhost:5999/v1/agent/run' \
+  -H 'accept: application/json' -H 'Content-Type: application/json' \
+  -d '{
+  "thread_id": "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c11",
+  "confirm": true
+}'
+```
+
+- The note is written and the run finishes with `status: "ok"` and the model's
+  answer. The note is recorded in a file (it could be a database later):
+
+![Resulting note in data/notes/notes.txt](docs/images/resulting_note.png)
+
+- `GET /v1/threads/6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c11` shows the whole thread: the
+  messages, tool calls and results, and any summary.
+
 ## How the agent works
 The agent is a LangGraph graph with three nodes. The model either answers or asks for
 tool calls; read-only tools run straight away, and a side-effecting tool (add_note)
