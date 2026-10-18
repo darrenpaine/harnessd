@@ -22,7 +22,7 @@ Gemini and local Ollama models.
   (see [Setup](#setup)).
 - Call the `/v1/agent/run` endpoint with the message
   `"Add a note about the weather at Santa's House."`. You can also do this from the
-  OpenAPI docs at `http://localhost:5999/docs`.
+  OpenAPI docs at <http://localhost:5999/docs>.
 
 ```bash
 curl -X 'POST' 'http://localhost:5999/v1/agent/run' \
