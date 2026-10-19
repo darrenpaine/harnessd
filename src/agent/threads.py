@@ -34,6 +34,7 @@ from schemas import (
     ThreadToolCall,
 )
 from settings import Settings
+from tracing import thread_span
 
 SUMMARY_PROMPT = (
     "Summarise the conversation below for an assistant that will continue it. "
@@ -75,7 +76,7 @@ class ThreadService:
 
     async def read(self, thread_id: UUID) -> ThreadState:
         """B-0001: the latest state, without the lock or a TTL reset."""
-        with log_context(thread=str(thread_id)):
+        with log_context(thread=str(thread_id)), thread_span("thread.read", thread_id):
             snapshot = await self._snapshot(thread_id)
             pending = snapshot.interrupts
             state = ThreadState(
@@ -93,7 +94,10 @@ class ThreadService:
 
     async def delete(self, thread_id: UUID) -> None:
         """B-0002: remove every checkpoint of the thread, under its lock."""
-        with log_context(thread=str(thread_id)):
+        with (
+            log_context(thread=str(thread_id)),
+            thread_span("thread.delete", thread_id),
+        ):
             async with self.guard.hold(str(thread_id)):
                 await self._snapshot(thread_id)
                 saver = self.graph.checkpointer
@@ -108,7 +112,10 @@ class ThreadService:
         A thread with pending steps is refused: rewriting its state would leave
         those steps behind, and the update would lose the summary.
         """
-        with log_context(thread=str(thread_id)):
+        with (
+            log_context(thread=str(thread_id)),
+            thread_span("thread.compact", thread_id, keep_turns=keep_turns) as span,
+        ):
             started = time.perf_counter()
             async with self.guard.hold(str(thread_id)):
                 snapshot = await self._snapshot(thread_id)
@@ -134,6 +141,7 @@ class ThreadService:
                 messages_removed=len(removed),
                 ms=elapsed_ms(started),
             )
+            span.set_attribute("messages_removed", len(removed))
             return CompactResponse(
                 thread_id=thread_id,
                 compacted=bool(removed),

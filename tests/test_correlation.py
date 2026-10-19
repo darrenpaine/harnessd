@@ -7,9 +7,19 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 
 from agent.graph import build_graph
-from agent_support import Capture, MakeClient
+from agent_support import (
+    Capture,
+    MakeClient,
+    StartTracing,
+    fetch,
+    finished_spans,
+    tool_turn,
+)
 from api.deps import get_graph
 from app import app
 from fakes import RaisingChatModel
@@ -74,3 +84,26 @@ async def test_request_id(
     assert failed.headers["X-Request-ID"] == "req-500"
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert any("request=req-500" in r.getMessage() for r in errors)
+
+
+@pytest.mark.spec("SPEC-0010", "B-0006", "AT-0007")
+async def test_logs_carry_trace_id(
+    make_client: MakeClient,
+    start_tracing: StartTracing,
+    capture: Capture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    exporter = InMemorySpanExporter()
+    tracing = start_tracing(exporter)
+    client, _ = make_client([tool_turn(fetch()), AIMessage(content="done")])
+    capture("info")
+
+    response = await client.post(RUN, json={"message": "hi"})
+
+    assert response.status_code == 200
+    run = next(s for s in finished_spans(tracing, exporter) if s.name == "agent.run")
+    assert run.context is not None
+    trace_id = format(run.context.trace_id, "032x")
+    lines = [r.getMessage() for r in caplog.records if r.name.startswith(ROOT)]
+    assert len(lines) >= 4  # run.start, graph steps, tool.call, run.end
+    assert all(f"trace={trace_id}" in line for line in lines)

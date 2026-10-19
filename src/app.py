@@ -13,6 +13,7 @@ from api.deps import Services, app_settings
 from api.errors import add_error_handlers
 from api.request_id import RequestIdMiddleware
 from logs import configure_logging
+from tracing import configure_tracing, instrument_app
 
 SPECS_URL = "https://github.com/darrenpaine/harnessd/blob/main/docs/specs/README.md"
 
@@ -42,10 +43,13 @@ def project_version() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    configure_logging(app_settings(app))
+    settings = app_settings(app)
+    configure_logging(settings)
+    tracing = configure_tracing(settings)
     app.state.services = Services()
     yield
     await app.state.services.aclose()
+    tracing.shutdown()
 
 
 app = FastAPI(
@@ -59,3 +63,4 @@ app.add_middleware(RequestIdMiddleware)  # outside the error handling
 app.include_router(agent.router)
 app.include_router(threads.router)
 app.include_router(health.router)
+instrument_app(app)  # outermost, so error responses are traced too

@@ -3,6 +3,7 @@
 import re
 import uuid
 
+from opentelemetry import trace
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -21,7 +22,8 @@ def request_id(supplied: str | None) -> str:
 
 
 class RequestIdMiddleware:
-    """Tag the request's log lines with its id and return the id as a header.
+    """Tag the request's log lines and server span with its id, and return the
+    id as a header.
 
     Added after the error handling, so it wraps it: 422 and 500 responses, and
     the `request.failed` log line, carry the id too.
@@ -39,6 +41,7 @@ class RequestIdMiddleware:
             None,
         )
         rid = request_id(supplied)
+        trace.get_current_span().set_attribute("request_id", rid)  # B-0006
 
         async def tagged(message: Message) -> None:
             if message["type"] == "http.response.start":

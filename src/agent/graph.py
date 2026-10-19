@@ -18,6 +18,7 @@ from langchain_core.messages import (
 from langchain_core.messages.tool import ToolCall
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
@@ -27,6 +28,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from logs import clip, elapsed_ms, event, get_logger
 from schemas import ErrorCode, PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
+from tracing import confirm_span, tool_result, tool_span
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant. Use the tools when they help answer the user. "
@@ -217,10 +219,18 @@ def _log_call(
     )
 
 
+def _not_run(call: ToolCall | InvalidToolCall, result: ToolError) -> None:
+    """Log and trace a call that never ran: invalid, malformed or rejected."""
+    with tool_span(call["name"], call["id"], call["args"]) as span:
+        tool_result(span, result)
+    _log_call(call, result, None)
+
+
 async def _run_call(
     tool: Tool[Any, Any], call: ToolCall, ctx: ToolContext
 ) -> BaseModel:
-    """Run one validated call, logging its input (debug) and result."""
+    """Run one validated call, logging its input (debug) and result, in an
+    agent.tool span (SPEC-0010)."""
     event(
         log,
         logging.DEBUG,
@@ -229,8 +239,10 @@ async def _run_call(
         call_id=call["id"],
         input=clip(call["args"]),
     )
-    started = time.perf_counter()
-    result: BaseModel = await call_tool(tool, call["args"], ctx)
+    with tool_span(call["name"], call["id"], call["args"]) as span:
+        started = time.perf_counter()
+        result: BaseModel = await call_tool(tool, call["args"], ctx)
+        tool_result(span, result)
     _log_call(call, result, started)
     return result
 
@@ -288,7 +300,7 @@ def build_graph(
             return Command(update=update, goto=END)
 
         for bad in reply.invalid_tool_calls:
-            _log_call(bad, MALFORMED, None)
+            _not_run(bad, MALFORMED)
         update |= {
             "messages": [reply, *malformed],
             "queue": calls,
@@ -307,7 +319,7 @@ def build_graph(
             call = queue[0]
             data = _parse(call, tools)
             if isinstance(data, ToolError):
-                _log_call(call, data, None)
+                _not_run(call, data)
                 messages.append(_tool_message(data, call["id"] or ""))
             elif tools[call["name"]].side_effect:
                 break
@@ -326,13 +338,21 @@ def build_graph(
         tool = tools[call["name"]]
         data = tool.input_model.model_validate(call["args"])
         pending = PendingAction.model_validate({"tool": tool.name, "input": data})
-        approved = interrupt(pending.model_dump(mode="json"))
+        with confirm_span(tool.name) as span:
+            try:
+                approved = interrupt(pending.model_dump(mode="json"))
+            except GraphInterrupt:
+                span.set_attribute("decision", "awaiting")
+                raise
+            span.set_attribute(
+                "decision", "approved" if approved is True else "rejected"
+            )
         result: BaseModel
         if approved is True:
             result = await _run_call(tool, call, ctx)
         else:
             result = ToolError(code="rejected", message="the user declined this call")
-            _log_call(call, result, None)
+            _not_run(call, result)
         update = {
             "messages": [_tool_message(result, call["id"] or "")],
             "trace": [*state["trace"], _record(call, data, result)],
