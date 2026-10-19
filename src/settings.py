@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # Tracing (SPEC-0010)
     tracing_enabled: bool = False
-    langfuse_host: str = "http://localhost:3000"
+    langfuse_host: str = "http://localhost:5998"
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     # Standard OTel variables; when set they replace the Langfuse values.

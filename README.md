@@ -135,7 +135,7 @@ and confirmation. A thread's traces are grouped as one Langfuse session.
 
 1. `make langfuse` starts Langfuse and its stores (Postgres, ClickHouse, Redis,
    MinIO) under the compose `observability` profile. It needs several GB of RAM.
-2. Open http://localhost:3000, sign up (the account is local), create an
+2. Open http://localhost:5998, sign up (the account is local), create an
    organisation and a project, then create API keys in the project's settings.
 3. In `.env` set `TRACING_ENABLED=true`, `LANGFUSE_PUBLIC_KEY` and
    `LANGFUSE_SECRET_KEY`, and restart the server.

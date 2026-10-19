@@ -42,7 +42,7 @@ Everything runs locally on open-source software; tracing is off unless configure
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `TRACING_ENABLED` | `false` | Turn on OTel tracing. Off → no exporter, no spans recorded. |
-| `LANGFUSE_HOST` | `http://localhost:3000` | Langfuse base URL; the OTLP endpoint is `<host>/api/public/otel`. |
+| `LANGFUSE_HOST` | `http://localhost:5998` | Langfuse base URL; the OTLP endpoint is `<host>/api/public/otel`. |
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | none | Langfuse project keys, sent as OTLP basic auth. Required when tracing is on, unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` | none | Standard OTel variables; when set they override the Langfuse values, to send traces to another backend. |
 | `TRACE_CONTENT` | `true` | Record prompts, replies and tool inputs/outputs on spans. `false` keeps only names, ids, timings, token counts and status. Set `false` in shared deployments; `.env.example` says so. |

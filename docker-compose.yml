@@ -38,7 +38,7 @@ services:
       start_period: 15s
 
   # Langfuse, for traces (SPEC-0010): `make langfuse`, then open
-  # http://localhost:3000. Taken from Langfuse's docker-compose.yml (v4 images),
+  # http://localhost:5998. Taken from Langfuse's docker-compose.yml (v4 images),
   # trimmed to the settings it needs locally. Only the web UI, which also takes
   # the OTLP traffic, is published; its own Redis, Postgres, ClickHouse and
   # MinIO stay on the compose network. The passwords are Langfuse's local
@@ -57,10 +57,10 @@ services:
       langfuse-redis:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "5998:3000"  # host port 5998: 3000 is often taken
     environment:
       <<: &langfuse-env
-        NEXTAUTH_URL: http://localhost:3000
+        NEXTAUTH_URL: http://localhost:5998
         DATABASE_URL: postgresql://postgres:postgres@langfuse-postgres:5432/postgres
         SALT: mysalt
         ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
