@@ -1,6 +1,6 @@
 # SPEC-0010: Observability
 
-Status: reviewed
+Status: implemented
 Requirements: R-0014
 Design: [design.md](../design/design.md)
 

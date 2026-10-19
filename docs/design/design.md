@@ -3,7 +3,8 @@
 Status: reviewed
 Specs: SPEC-0001 Agent core, SPEC-0002 API service, SPEC-0003 Tool contract,
 SPEC-0004 State and persistence, SPEC-0005 Test strategy, SPEC-0006 Traceability,
-SPEC-0007 API documentation, SPEC-0009 Thread management (see [the spec index](../specs/README.md))
+SPEC-0007 API documentation, SPEC-0008 Logging, SPEC-0009 Thread management,
+SPEC-0010 Observability (see [the spec index](../specs/README.md))
 
 This document pulls together how the service is built and why. The specs are the
 contract; where this document and a spec disagree, the spec wins and this document
@@ -65,7 +66,10 @@ yet written.
 
 | Module | Responsibility | Spec | Status |
 |--------|----------------|------|--------|
-| `src/app.py` | Builds the FastAPI app: Swagger/ReDoc metadata, lifespan (logging, `Services`), error handlers and the routers. | SPEC-0002, SPEC-0007 | built |
+| `src/app.py` | Builds the FastAPI app: Swagger/ReDoc metadata, lifespan (logging, tracing, `Services`), error handlers, the request id middleware, the routers and the FastAPI instrumentation (outermost, so error responses are traced). | SPEC-0002, SPEC-0007, SPEC-0010 | built |
+| `src/logs.py` | `configure_logging()` (level, text or JSON lines); `event()` writes one event line with the fields of any enclosing `log_context()` block (request id, thread) and the current trace id. | SPEC-0008, SPEC-0010 B-0006, B-0008 | built |
+| `src/tracing.py` | `configure_tracing()`: OTLP export in batches to Langfuse (or `OTEL_EXPORTER_OTLP_ENDPOINT`), OpenInference instrumentation of LangChain, failed exports logged at most once a minute. `PROVIDER` hands spans to whichever provider is configured (no-op when off), since OTel's global provider and FastAPI's middleware can each be set only once. Our spans: `agent.run`, `agent.tool <name>`, `agent.confirm`, `thread.*`. | SPEC-0010 | built |
+| `src/api/request_id.py` | Pure ASGI middleware: takes or makes the request id, returns it as `X-Request-ID`, tags log lines and the server span with it. | SPEC-0010 B-0006, B-0007 | built |
 | `src/api/agent.py`, `src/api/threads.py`, `src/api/health.py` | One `APIRouter` per area: `POST /v1/agent/run` (turns `ConfirmationStateError` into 422); `GET`/`DELETE /v1/threads/{id}` and `POST /v1/threads/{id}/compact`; `GET /health`. | SPEC-0002, SPEC-0009 | built |
 | `src/api/deps.py` | `Services` builds the Redis client, chat model and graph on first use, so the app starts while Redis is down. Dependencies `get_settings` → `get_graph` / `get_guard` / `get_model` → `get_runner` / `get_threads`; tests override the graph, guard and model. | SPEC-0002, SPEC-0009 | built |
 | `src/api/errors.py` | Exception handlers: `ThreadBusyError`, `ThreadAwaitingConfirmationError` and `ThreadRunUnfinishedError` → 409, `ThreadNotFoundError` → 404, `SummaryError` → 500, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
@@ -82,7 +86,7 @@ yet written.
 | `scripts/trace.py` | Builds `docs/traceability.md` from specs and test markers and flags gaps (`make trace`; run in CI). | SPEC-0006 | built |
 | `tests/fakes.py` | `ScriptedChatModel`: replays scripted replies, records inputs. | SPEC-0005 B-0002 | built |
 | `tests/conftest.py`, `tests/redis_support.py` | Clears API keys for every test; `redis_url` fixture (skip locally, fail in CI); `tool_context` fixture. | SPEC-0005 | built |
-| `Dockerfile`, `docker-compose.yml` | App image; Redis 8.2 with data in a host folder (`REDIS_DATA_DIR`). | – | built |
+| `Dockerfile`, `docker-compose.yml` | App image; Redis 8.2 with data in a host folder (`REDIS_DATA_DIR`); Langfuse and its stores under the `observability` profile (`make langfuse`). | SPEC-0010 | built |
 | `.github/workflows/ci.yaml` | Lint, format check, mypy; pytest with a Redis 8.2 service container. | SPEC-0005 | built |
 
 ### Data flow
@@ -215,6 +219,7 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 | Compacting a thread awaiting confirmation | 409 `thread_awaiting_confirmation` | SPEC-0009 B-0007 |
 | Compacting a thread whose last run timed out mid-step | 409 `thread_run_unfinished`; the next message finishes it | SPEC-0009 B-0011 |
 | Summary call times out or returns no text | 500 `internal`, `thread.compact_failed` warning, state unchanged (a provider error is a 503) | SPEC-0009 B-0008 |
+| Trace backend down or slow | Requests unaffected (export runs on the batch processor's thread); `trace.export_failed` warning at most once a minute | SPEC-0010 B-0005 |
 | Redis lacks the JSON/search modules | `redis` tests skip locally / fail in CI with a clear reason | SPEC-0005 B-0003 |
 
 ## Alternatives considered
@@ -229,6 +234,7 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 | LangChain `init_chat_model` | One call for any provider | Needs the `langchain` package | A small factory over the three provider packages |
 | Hand-written Tavily fake | Simple | Skips the real client's request/response handling | Real client on an `httpx.MockTransport` |
 | `DOCS_ENABLED` setting | Can hide docs | Extra config for a non-production service | Docs always on |
+| Set OTel's global tracer provider at startup | The usual OTel setup | Can be set once per process, and FastAPI's middleware fetches its tracer once, so tests couldn't switch tracing on and off | A switching provider that delegates each span to the configured one |
 | Build the API before tools and graph | Swagger to try early | Needs a placeholder runner | Tools → graph → API, each piece real when it lands |
 
 ## Decision
@@ -256,6 +262,12 @@ to every key containing the thread id (a UUID) after each run, except the lock k
   `RedisSearchError`), `httpx.TransportError` (Ollama, Gemini) and LangChain's
   `ModelConnectionError` (Anthropic). A provider that raises something else gives a
   500 instead of a 503.
+- **Span parents in graph nodes**: OpenInference doesn't make its node spans current
+  in the OTel context, so `agent.tool` and `agent.confirm` find their parent with
+  its `get_current_span()` (from LangChain's run config). A change there would
+  attach them to `agent.run` instead; `test_run_span_tree` would catch it.
+- **Langfuse stack** needs several GB of RAM (Postgres, ClickHouse, Redis, MinIO),
+  so it runs only under the `observability` profile, never in CI.
 - **langgraph-checkpoint-redis** emits a deprecation warning about
   `get_async_redis_connection`; watch for a breaking release.
 - **Traceability script** (SPEC-0006) isn't built yet, so gaps are checked by hand.

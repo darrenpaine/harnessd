@@ -124,7 +124,28 @@ Without it the agent still runs, but every search returns an error to the model.
 `LOG_LEVEL` (`debug`, `info`, `warning`, `error`; default `info`) sets how much the
 server logs. At `info` each run logs its start and end, every graph step and every
 tool call, tagged with the thread id. Message text and answers are never logged;
-`debug` adds tool inputs.
+`debug` adds tool inputs. Every line written while handling a request carries
+`request=` (the `X-Request-ID` header, returned on every response) and, with
+tracing on, `trace=`. `LOG_FORMAT=json` writes one JSON object per line instead.
+
+### Tracing (Langfuse)
+Tracing is off by default. With it on, each request is one trace: the HTTP request,
+the agent run, every model call (prompt, reply, tokens, latency) and every tool call
+and confirmation. A thread's traces are grouped as one Langfuse session.
+
+1. `make langfuse` starts Langfuse and its stores (Postgres, ClickHouse, Redis,
+   MinIO) under the compose `observability` profile. It needs several GB of RAM.
+2. Open http://localhost:3000, sign up (the account is local), create an
+   organisation and a project, then create API keys in the project's settings.
+3. In `.env` set `TRACING_ENABLED=true`, `LANGFUSE_PUBLIC_KEY` and
+   `LANGFUSE_SECRET_KEY`, and restart the server.
+
+Prompts, replies and tool data are recorded on spans; set `TRACE_CONTENT=false` to
+keep only names, ids, timings and token counts (do this in shared deployments). To
+send traces to another OTLP backend (Phoenix, Jaeger, ...), set
+`OTEL_EXPORTER_OTLP_ENDPOINT` and, if needed, `OTEL_EXPORTER_OTLP_HEADERS`. If the
+backend is down, requests are unaffected and a `trace.export_failed` warning is
+logged at most once a minute.
 
 ## Development
 
@@ -140,4 +161,5 @@ make fix      # lint files and fix
 make format   # format files with ruff
 make pytests  # Run pytest on tests
 make trace    # check spec traceability, write docs/traceability.md
+make langfuse # start a local Langfuse for traces (needs Docker)
 ```
