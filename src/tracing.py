@@ -129,6 +129,10 @@ class SwitchingTracerProvider(trace.TracerProvider):
         self.current: trace.TracerProvider = trace.NoOpTracerProvider()
         self.content = False
 
+    @property
+    def enabled(self) -> bool:
+        return not isinstance(self.current, trace.NoOpTracerProvider)
+
     def get_tracer(
         self,
         instrumenting_module_name: str,
@@ -294,7 +298,10 @@ def thread_span(
 def _node_context() -> Context | None:
     """The graph node's span as parent context. OpenInference doesn't make its
     spans current, so without this a span started in a node would hang off
-    agent.run instead."""
+    agent.run instead. Skipped when tracing is off: OpenInference then prints
+    a warning on every lookup."""
+    if not PROVIDER.enabled:
+        return None
     span = langchain_span()
     return trace.set_span_in_context(span) if span is not None else None
 

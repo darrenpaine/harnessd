@@ -79,7 +79,9 @@ def dump(spans: Sequence[ReadableSpan]) -> str:
 
 @pytest.mark.spec("SPEC-0010", "B-0001", "AT-0001")
 async def test_tracing_off_records_nothing(
-    make_client: MakeClient, start_tracing: StartTracing
+    make_client: MakeClient,
+    start_tracing: StartTracing,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     exporter = InMemorySpanExporter()
     tracing = start_tracing(exporter, enabled=False)
@@ -90,6 +92,7 @@ async def test_tracing_off_records_nothing(
     assert response.status_code == 200
     assert finished_spans(tracing, exporter) == []
     assert not LangChainInstrumentor().is_instrumented_by_opentelemetry
+    assert capsys.readouterr().out == ""  # no OpenInference warnings either
 
 
 @pytest.mark.spec("SPEC-0010", "B-0002", "B-0003", "B-0006", "AT-0002")
