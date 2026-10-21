@@ -13,12 +13,14 @@ from uuid import UUID, uuid4
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
+from opentelemetry.trace import Span, StatusCode
 
 from agent.graph import AgentGraph, RunInput, run_counters, thread_config
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, log_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo, PendingAction
 from settings import Settings
+from tracing import INPUT, OUTPUT, record_content, thread_span
 
 log = get_logger("runner")
 
@@ -43,10 +45,21 @@ class AgentRunner:
         """Run a request to its end. Raises ThreadBusyError and
         ConfirmationStateError; dependency failures propagate."""
         thread_id = request.thread_id or uuid4()
-        with log_context(thread=str(thread_id)):
+        with (
+            log_context(thread=str(thread_id)),
+            thread_span(
+                "agent.run",
+                thread_id,
+                span_kind="AGENT",
+                kind=_kind(request),
+                max_tool_calls=request.max_tool_calls,
+            ) as span,
+        ):
+            record_content(span, INPUT, request.message)
             started = time.perf_counter()
             response = await self._run(request, thread_id)
             _log_end(response, started)
+            _trace_end(span, response)
             return response
 
     async def _run(self, request: AgentRequest, thread_id: UUID) -> AgentResponse:
@@ -67,7 +80,7 @@ class AgentRunner:
             log,
             logging.INFO,
             "run.start",
-            kind="message" if request.message is not None else "confirm",
+            kind=_kind(request),
             max_tool_calls=request.max_tool_calls,
             provider=self.settings.llm_provider,
             model=self.settings.llm_model,
@@ -120,6 +133,20 @@ class AgentRunner:
                 message=f"the run took longer than {limit:g} s",
             ),
         )
+
+
+def _kind(request: AgentRequest) -> str:
+    return "message" if request.message is not None else "confirm"
+
+
+def _trace_end(span: Span, response: AgentResponse) -> None:
+    """The run's outcome on agent.run (SPEC-0010 B-0002)."""
+    span.set_attribute("status", response.status)
+    span.set_attribute("tool_calls", len(response.tool_calls))
+    if response.error is not None:
+        span.set_attribute("error", response.error.code)
+        span.set_status(StatusCode.ERROR, response.error.message)
+    record_content(span, OUTPUT, response.answer)
 
 
 def _log_end(response: AgentResponse, started: float) -> None:

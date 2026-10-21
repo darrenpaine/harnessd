@@ -11,6 +11,8 @@ import httpx
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agent.graph import build_graph
 from agent.persistence import ThreadBusyError, ThreadGuard
@@ -20,6 +22,7 @@ from schemas import AgentRequest, AgentResponse
 from settings import LogLevel
 from tools import TOOLS
 from tools.base import ToolContext
+from tracing import Tracing
 
 PAGE_TEXT = "page text"
 
@@ -28,6 +31,17 @@ Capture = Callable[[LogLevel], None]
 
 # The `make_client` fixture: (scripted replies, Agent options) -> (client, agent).
 MakeClient = Callable[..., tuple[httpx.AsyncClient, "Agent"]]
+
+# The `start_tracing` fixture: (exporter, enabled=, content=) -> Tracing.
+StartTracing = Callable[..., Tracing]
+
+
+def finished_spans(
+    tracing: Tracing, exporter: InMemorySpanExporter
+) -> list[ReadableSpan]:
+    """Every span ended so far, after flushing the batch processor."""
+    tracing.force_flush()
+    return list(exporter.get_finished_spans())
 
 
 class LocalThreadGuard:

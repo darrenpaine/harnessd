@@ -33,6 +33,7 @@ from agent.threads import (
 from api.deps import app_settings
 from logs import event, get_logger
 from schemas import ApiError, ApiErrorCode, ApiErrorDetail
+from tracing import tag_error
 
 log = get_logger("app")
 
@@ -57,6 +58,7 @@ def error_responses(descriptions: dict[int, str]) -> dict[int | str, dict[str, A
 
 
 def api_error(status: int, code: ApiErrorCode, message: str) -> JSONResponse:
+    tag_error(code)  # SPEC-0010 B-0002
     body = ApiError(error=ApiErrorDetail(code=code, message=message))
     return JSONResponse(status_code=status, content=body.model_dump())
 

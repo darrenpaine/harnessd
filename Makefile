@@ -5,8 +5,10 @@ up:
 	sudo docker compose up -d
 redis:
 	sudo docker compose up -d redis
+langfuse:  # Langfuse on http://localhost:5998, for traces (SPEC-0010)
+	sudo docker compose --profile observability up -d langfuse-web langfuse-worker
 down:
-	sudo docker compose down
+	sudo docker compose --profile observability down
 build:
 	sudo docker compose build
 logs:

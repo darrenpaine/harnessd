@@ -2,7 +2,9 @@
 
 import asyncio
 import dataclasses
+import json
 import logging
+import re
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -28,7 +30,15 @@ from api.deps import get_graph, get_guard
 from api.errors import InternalErrorMiddleware
 from app import app
 from fakes import RaisingChatModel
-from logs import ROOT, clip, event, log_context
+from logs import (
+    ROOT,
+    JsonFormatter,
+    clip,
+    configure_logging,
+    event,
+    formatter,
+    log_context,
+)
 from settings import LogLevel, Settings, get_settings
 from tools import TOOLS
 from tools.base import ToolContext
@@ -235,7 +245,9 @@ async def test_error_responses_logged(
     assert (await refused.post(RUN, json={"message": "hi"})).status_code == 503
     [record] = [r for r in caplog.records if r.name.startswith(ROOT)][-1:]
     assert record.levelno == logging.WARNING
-    assert record.getMessage().startswith("dependency.unavailable cause=")
+    name, *fields = record.getMessage().split(" ")
+    assert name == "dependency.unavailable"
+    assert fields[0].startswith("request=") and "cause=" in record.getMessage()
 
 
 @pytest.mark.spec("SPEC-0008", "B-0005")
@@ -310,3 +322,48 @@ async def test_middleware_passes_other_scopes_and_late_errors(
         await middleware({"type": "http", "path": "/x"}, _receive, collect)
     assert [m["type"] for m in sent] == ["http.response.start"]
     assert names(caplog) == ["request.failed"]
+
+
+@pytest.mark.spec("SPEC-0010", "B-0008", "AT-0008")
+def test_log_format(capture: Capture, caplog: pytest.LogCaptureFixture) -> None:
+    capture("info")
+    log = logging.getLogger(f"{ROOT}.test")
+    with log_context(request="r-1"), log_context(thread="t-1"):
+        event(log, logging.INFO, "run.start", kind="message", max_tool_calls=5)
+    log.warning("plain %s", "message")
+    record, plain = [r for r in caplog.records if r.name.startswith(ROOT)]
+
+    json_settings = Settings(_env_file=None, log_format="json")  # type: ignore[call-arg]
+    as_json = json.loads(formatter(json_settings).format(record))
+    assert as_json == {
+        "time": as_json["time"],
+        "level": "info",
+        "logger": "harnessd.test",
+        "event": "run.start",
+        "request_id": "r-1",
+        "thread": "t-1",
+        "kind": "message",
+        "max_tool_calls": 5,
+    }
+    assert list(as_json)[:5] == ["time", "level", "logger", "event", "request_id"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", as_json["time"])
+    plain_json = json.loads(JsonFormatter().format(plain))
+    assert plain_json["message"] == "plain message" and "event" not in plain_json
+
+    text = formatter(Settings(_env_file=None)).format(record)  # type: ignore[call-arg]
+    assert text.endswith(
+        "INFO harnessd.test run.start request=r-1 thread=t-1 kind=message "
+        "max_tool_calls=5"
+    )
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, log_format="xml")  # type: ignore[call-arg, arg-type]
+
+
+@pytest.mark.spec("SPEC-0010", "B-0008")
+def test_log_format_applied(capture: Capture) -> None:
+    upper = Settings(_env_file=None, log_format="JSON")  # type: ignore[call-arg, arg-type]
+    configure_logging(upper)
+    [handler] = [h for h in logging.getLogger(ROOT).handlers if hasattr(h, "harnessd")]
+    assert isinstance(handler.formatter, JsonFormatter)
+    configure_logging(Settings(_env_file=None))  # type: ignore[call-arg]
+    assert not isinstance(handler.formatter, JsonFormatter)

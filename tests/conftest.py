@@ -8,22 +8,34 @@ from typing import Any
 import httpx
 import pytest
 from langchain_core.messages import AIMessage
+from opentelemetry.sdk.trace.export import SpanExporter
 
 import redis_support
-from agent_support import Agent, Capture, MakeClient
+from agent_support import Agent, Capture, MakeClient, StartTracing
 from api.deps import get_graph, get_guard, get_model
 from app import app
 from logs import ROOT, configure_logging
 from settings import LogLevel, Settings, get_settings
 from tools.base import ToolContext
+from tracing import Tracing, configure_tracing
 
-SECRET_ENV_VARS = ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "TAVILY_API_KEY")
+SECRET_ENV_VARS = (
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "TAVILY_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+)
+# Local settings that would change what tests see (SPEC-0010).
+LOCAL_ENV_VARS = ("TRACING_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "LOG_FORMAT")
 
 
 @pytest.fixture(autouse=True)
 def _clear_secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test may depend on a real API key (SPEC-0005 B-0001)."""
-    for name in SECRET_ENV_VARS:
+    """No test may depend on a real API key (SPEC-0005 B-0001) or on local
+    tracing and log settings."""
+    for name in (*SECRET_ENV_VARS, *LOCAL_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -68,6 +80,29 @@ def capture(caplog: pytest.LogCaptureFixture) -> Iterator[Capture]:
     root.handlers[:] = saved[2]
     for name, level in http.items():
         logging.getLogger(name).setLevel(level)
+
+
+@pytest.fixture
+def start_tracing() -> Iterator[StartTracing]:
+    """Turn tracing on (or off) with a test exporter; stopped after the test."""
+    started: list[Tracing] = []
+
+    def start(
+        exporter: SpanExporter, *, enabled: bool = True, content: bool = True
+    ) -> Tracing:
+        settings = Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            tracing_enabled=enabled,
+            otel_exporter_otlp_endpoint="http://otlp.invalid",
+            trace_content=content,
+        )
+        tracing = configure_tracing(settings, exporter)
+        started.append(tracing)
+        return tracing
+
+    yield start
+    for tracing in started:
+        tracing.shutdown()
 
 
 @pytest.fixture

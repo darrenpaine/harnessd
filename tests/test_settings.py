@@ -96,13 +96,13 @@ def test_defaults() -> None:
 @pytest.mark.spec("SPEC-0001", "B-0001")
 def test_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "KEY-MARKER")
     monkeypatch.setenv("RUN_TIMEOUT_SECONDS", "0.1")
     s = _settings()
     assert s.llm_provider == "anthropic"
     assert s.run_timeout_seconds == 0.1
     assert s.anthropic_api_key is not None
-    assert "secret" not in repr(s)
+    assert "KEY-MARKER" not in repr(s)
 
 
 @pytest.mark.spec("SPEC-0001", "B-0006")
@@ -127,3 +127,14 @@ def test_build_chat_model_rejects_missing_key() -> None:
     unchecked = Settings.model_construct(llm_provider="anthropic", llm_model="m")
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is not set"):
         build_chat_model(unchecked)
+
+
+@pytest.mark.spec("SPEC-0010", "B-0009", "AT-0009")
+def test_tracing_settings_validated() -> None:
+    assert _settings().tracing_enabled is False
+    with pytest.raises(ValidationError, match="TRACING_ENABLED"):
+        _settings(tracing_enabled=True)
+    with pytest.raises(ValidationError, match="TRACING_ENABLED"):
+        _settings(tracing_enabled=True, langfuse_public_key="pk")
+    _settings(tracing_enabled=True, langfuse_public_key="pk", langfuse_secret_key="sk")
+    _settings(tracing_enabled=True, otel_exporter_otlp_endpoint="http://otel:4318")
