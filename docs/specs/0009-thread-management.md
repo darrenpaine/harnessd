@@ -58,7 +58,9 @@ The system prompt and the run counters (calls used, queued calls) are not return
   thread → 404 `thread_not_found`.
 - B-0002: `DELETE` removes every checkpoint key for the thread and returns 204. It
   holds the thread lock while it runs (B-0003) and releases it after. A later run with the same id starts a new
-  thread (SPEC-0004 B-0002). An unknown or expired thread → 404.
+  thread (SPEC-0004 B-0002). An unknown or expired thread → 404. A thread exists
+  for `DELETE` if it has a checkpoint; `DELETE` does not load the thread's state,
+  so it also removes a thread whose saved state can't be loaded.
 - B-0003: `DELETE` and `compact` take the thread lock (SPEC-0004 B-0005); while a run
   holds it they return 409 `thread_busy` and change nothing. A run started during a
   compaction gets 409.
@@ -105,6 +107,10 @@ use real Redis (SPEC-0005).
 - AT-0004 (B-0002): After DELETE → 204, no Redis key containing the thread id remains,
   GET → 404, and a new run on the id sees only its own message.
   -> `tests/test_threads.py::test_delete_thread` (redis)
+- AT-0014 (B-0002): A thread whose saved state fails to load (conflicting pending
+  writes added to its latest checkpoint) → GET → 500 `internal`, DELETE → 204, and no
+  Redis key containing the thread id remains.
+  -> `tests/test_threads.py::test_delete_unloadable_thread` (redis)
 - AT-0005 (B-0003): While a fake model blocks a run, DELETE and compact → 409
   `thread_busy` and the state is unchanged. -> `tests/test_threads.py::test_busy_thread_409`
 - AT-0006 (B-0004, B-0005): A thread with 4 turns, compact with keep_turns=1 →

@@ -93,15 +93,18 @@ class ThreadService:
             return state
 
     async def delete(self, thread_id: UUID) -> None:
-        """B-0002: remove every checkpoint of the thread, under its lock."""
+        """B-0002: remove every checkpoint of the thread, under its lock. It
+        checks for a checkpoint without loading the state, so a thread whose
+        state can't be loaded can still be deleted."""
         with (
             log_context(thread=str(thread_id)),
             thread_span("thread.delete", thread_id),
         ):
             async with self.guard.hold(str(thread_id)):
-                await self._snapshot(thread_id)
                 saver = self.graph.checkpointer
                 assert isinstance(saver, BaseCheckpointSaver)
+                if await saver.aget_tuple(thread_config(thread_id)) is None:
+                    raise ThreadNotFoundError(str(thread_id))
                 await saver.adelete_thread(str(thread_id))
             event(log, logging.INFO, "thread.deleted")
 
