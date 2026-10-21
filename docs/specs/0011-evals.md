@@ -1,6 +1,6 @@
 # SPEC-0011: Evals
 
-Status: reviewed
+Status: draft
 Requirements: R-0015
 Design: [design.md](../design/design.md)
 
@@ -15,14 +15,18 @@ is caught before it is merged.
 - **Own pytest-style harness, no framework.** Evals use the real `AgentRunner`, so
   they test the shipped code path, and each case names the spec behaviors it covers
   (SPEC-0006). No new dependency.
-- **Deterministic scoring first, optional "System One" judge.** Rule checks (status,
-  tools, args, answer text, limits) gate. Answer quality is judged by a decision
-  model: a fast model that answers named questions with typed values and a
-  calibrated confidence, instead of writing text. The local default is Bespoke Labs'
-  `nimble` (Apache 2.0) served by Ollama's `/v1/systemone` endpoint; TypeSafe AI's
-  hosted `Jev` is the alternative. Typed answers with confidence are easier to
-  threshold and compare between runs than a chat model's free-text grade. Judge
-  scores are reported, not gating, until they prove stable.
+- **Deterministic scoring first, optional chat-model judge.** Rule checks (status,
+  tools, args, tool results, answer text, limits) gate. Answer quality is judged by
+  a chat model (any SPEC-0001 provider) that answers named questions with typed
+  values and a confidence, as JSON validated against a Pydantic model, instead of
+  writing a free-text grade. Typed answers are easier to threshold and compare
+  between runs. The judge should be a different model from the one evaluated, so a
+  model doesn't grade its own answers. Judge scores are reported, not gating,
+  until they prove stable. Decision models (System One, Jev) are a possible later
+  refinement; see the alternatives.
+- **Redis checkpointer.** Cases run on the Redis checkpointer, the shipped
+  persistence path, so multi-turn cases catch persistence bugs such as the
+  repeated-confirmation failure (SPEC-0004 B-0006) that the in-memory one hides.
 - **Local runs only; no CI gate.** CI has no LLM keys (SPEC-0005). Evals run with
   `make evals` against the configured provider. Each run is recorded in the repo
   and the report shows the history, so a regression is visible in review.
@@ -38,7 +42,9 @@ is caught before it is merged.
 | Langfuse experiments | Used as a viewer (runs are uploaded when tracing is on, SPEC-0010), not as the runner, so evals work without the Langfuse stack. |
 | CI gate on a hosted model | Possible later (a labelled-PR workflow with a repo secret and spend cap); deferred to keep CI key-free and free. |
 | Ollama in CI | Free, but CPU runners are slow and small models fail tool calls often, so scores would mostly measure the small model. |
-| Chat model as judge (LLM-as-judge) | The common approach, but free-text grades drift with the judge and need parsing; kept as a fallback judge for providers without a decision endpoint. |
+| "System One" decision model as judge (Bespoke Labs' `nimble` via Ollama's `/v1/systemone`) | Answers typed questions with calibrated confidences, so it should be steadier than a chat model. Deferred: needs a local model pull and a newer endpoint; add it behind the `Judge` protocol if chat-judge scores prove noisy. |
+| TypeSafe AI's hosted `Jev` decision model as judge | Same idea, hosted. Deferred as a future refinement: early access, needs an API key. |
+| Chat-model judge with free-text grades | The common LLM-as-judge form, but free-text grades drift with the judge and need parsing; our chat judge returns typed JSON instead. |
 
 ## Inputs / Outputs
 ### Layout
@@ -59,11 +65,14 @@ src/evals/                      runner, scorers, report writer (typed, unit-test
 - tools: `stub` (default) or `live`. With `stub`, `tool_outputs` gives the canned
   result per tool name (a ToolError is allowed), so scores measure the model and the
   prompt, not today's search results. `live` runs the real tools.
-- expect (all optional, checked on the final turn unless `turn` is given):
+- expect: one block, or a list of blocks. A block's checks (all optional) apply to
+  the final turn, or to turn `turn` (0-based) when given:
   - status: RunStatus
   - tools_called: list of tool names, in order; `tools_called_any_order: true` relaxes order
   - tools_not_called: list of tool names
   - args: per tool, `{field: {"contains" | "equals" | "regex": value}}`
+  - tool_results: per tool, `"ok"` or a ToolError code; every call of that tool on
+    the turn must have that result (e.g. `{"add_note": "rejected"}`)
   - answer_contains: list[str] (case-insensitive, all must appear); answer_excludes: list[str]
   - answer_regex: str
   - max_tool_calls: int; max_latency_ms: int
@@ -77,6 +86,18 @@ Example:
  "specs": ["SPEC-0001 B-0005"], "must_pass": true,
  "turns": [{"message": "Add a note: buy milk"}],
  "expect": {"status": "awaiting_confirmation", "tools_called": [], "args": {"add_note": {"text": {"contains": "milk"}}}}}
+```
+
+Checks on several turns of one thread:
+```json
+{"id": "EV-0011", "description": "Confirms twice and rejects once on one thread",
+ "tags": ["confirmation"], "specs": ["SPEC-0001 B-0005", "SPEC-0004 B-0006"], "must_pass": true,
+ "turns": [{"message": "Add a note: one"}, {"confirm": true},
+           {"message": "Add a note: two"}, {"confirm": true},
+           {"message": "Add a note: three"}, {"confirm": false}],
+ "expect": [{"turn": 0, "status": "awaiting_confirmation"}, {"turn": 1, "status": "ok", "tool_results": {"add_note": "ok"}},
+            {"turn": 2, "status": "awaiting_confirmation"}, {"turn": 3, "status": "ok", "tool_results": {"add_note": "ok"}},
+            {"turn": 4, "status": "awaiting_confirmation"}, {"turn": 5, "status": "ok", "tool_results": {"add_note": "rejected"}}]}
 ```
 
 ### Scoring
@@ -98,10 +119,10 @@ Example:
   Each answer is recorded with its confidence. Judge score for a case = share of
   yes answers, counting only answers with confidence ≥ `EVAL_JUDGE_MIN_CONFIDENCE`
   (default 0.7); lower-confidence answers are listed as "unsure". Judges are behind
-  a `Judge` protocol in `src/evals/judge.py` with three implementations:
-  `ollama-systemone` (default; local, e.g. `nimble`), `jev` (TypeSafe AI API) and
-  `chat` (any SPEC-0001 chat model, prompted to return the same typed answers as
-  JSON). The judge kind and model are recorded with the scores.
+  a `Judge` protocol in `src/evals/judge.py`, so other kinds can be added later.
+  The one implementation is `chat`: a SPEC-0001 chat model prompted to return the
+  typed answers and confidences as JSON, validated with Pydantic. The judge kind,
+  provider and model are recorded with the scores.
 
 ### Run file
 `{run_id, started_at, git_sha, dirty, provider, model, judge_model, repeats,
@@ -116,18 +137,25 @@ Example:
   written but marked `partial` and never compared or used as a baseline.
 - `make evals-baseline` — accept the latest full run as the model's baseline.
 
+Runs need Redis (`make redis`), as the redis tests do.
+
 ### Settings
 `EVAL_REPEATS` (default 3), `EVAL_REGRESSION_POINTS` (default 5),
-`EVAL_JUDGE` (`ollama-systemone` | `jev` | `chat`; unset → no judge),
-`EVAL_JUDGE_MODEL` (e.g. `nimble`), `EVAL_JUDGE_MIN_CONFIDENCE` (default 0.7),
-`JEV_API_KEY` (only for `jev`). The Ollama judge uses `OLLAMA_BASE_URL`.
+`EVAL_JUDGE` (`chat`; unset → no judge), `EVAL_JUDGE_PROVIDER` (default
+`LLM_PROVIDER`), `EVAL_JUDGE_MODEL` (e.g. `gemma4:12b` on Ollama; required with a
+judge), `EVAL_JUDGE_MIN_CONFIDENCE` (default 0.7). The judge model uses the
+provider's existing settings (keys, `OLLAMA_BASE_URL`).
 
 ## Behavior
 - B-0001: Every case line validates against EvalCase; ids are unique. An invalid
   dataset stops the run before any model call.
-- B-0002: Cases run through `AgentRunner` with the configured model. With
-  `tools: stub`, tools return the case's canned outputs and make no network call;
-  add_note always writes to a temporary file.
+- B-0002: Cases run through `AgentRunner` with the configured model and the Redis
+  checkpointer at `REDIS_URL`; each repeat uses a new thread, deleted after the
+  case. Redis unreachable stops the run before any model call. With `tools: stub`,
+  tools return the case's canned outputs and make no network call; add_note
+  always writes to a temporary file. Stubbed tools keep the real tool's name,
+  input schema and side-effect flag, so the model sees the same tools and
+  confirmations still apply.
 - B-0003: Scoring follows the rules above; failures name the check and the actual
   value.
 - B-0004: A full run fails (exit 1) when its score is more than
@@ -167,24 +195,26 @@ Unit tests use the scripted fake model; none call a real LLM.
   -> `tests/test_evals.py::test_judge_scoring`
 - AT-0008 (B-0008): The committed dataset validates and REPORT.md is up to date.
   -> `tests/test_evals.py::test_committed_evals_consistent`
+- AT-0009 (B-0007): With tracing on and an in-memory exporter, a case run's spans
+  carry `eval.case_id` and `eval.run_id`. The Langfuse dataset-run upload is checked
+  by hand against the local stack. -> `tests/test_evals.py::test_case_spans`
 
 ## Initial dataset (about 20 cases)
 Answer without tools; search then answer; fetch a given URL; a fetch error handled
 gracefully; a note asks for confirmation (must_pass); a rejected note is not written
 (must_pass); a non-public URL is refused (must_pass, SPEC-0003); a request needing
 more tool calls than allowed ends truncated; a follow-up uses the thread's history;
-a prompt-injection page does not trigger add_note (must_pass, see SPEC-0012).
+a prompt-injection page does not trigger add_note (must_pass, see SPEC-0012);
+two notes confirmed and a third rejected on one thread, each turn checked
+(must_pass, SPEC-0004 B-0006; the example above).
 
 ## Non-goals
 A CI gate on a real model, human annotation workflows, a hosted eval dashboard,
 eval-driven prompt optimisation, benchmarking providers against each other.
 
 ## Open questions
-- Ollama's `/v1/systemone` endpoint arrived in Ollama 0.35, which one source says
-  was still a pre-release in late September 2026. The request and response shape
-  will be confirmed from Ollama's API docs at implementation time; until a stable
-  release ships it, the `chat` judge is the fallback.
-- Jev is in early access; the `jev` judge is built only if you have API access.
+None.
 
 Settled in review: stubbed tools by default (live per case); run files and
-REPORT.md are committed.
+REPORT.md are committed; the chat judge only, with System One and Jev deferred;
+cases run on the Redis checkpointer.
