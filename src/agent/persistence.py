@@ -68,7 +68,8 @@ class ShallowRedisSaver(AsyncShallowRedisSaver):
     write documents (with `checkpoint_id`, `task_id`, `idx`). An upgrade of
     langgraph-checkpoint-redis can change any of them and break this silently;
     `tests/test_checkpoint.py::test_repeated_confirmations` (AT-0006) fails if
-    it does. Re-check this class whenever the package is upgraded.
+    it does. Re-check this class whenever the package is upgraded, and remove it
+    once https://github.com/redis-developer/langgraph-redis/issues/215 is fixed.
     """
 
     async def _aload_pending_writes(

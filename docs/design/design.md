@@ -275,7 +275,8 @@ to every key containing the thread id (a UUID) after each run, except the lock k
   layout and write documents, so an upgrade can break it silently. Import fails
   if the method disappears, and SPEC-0004 AT-0006
   (`test_repeated_confirmations`) fails if it stops applying; re-check the class on
-  every upgrade, and drop it once the library is fixed. The old writes still stay
+  every upgrade, and drop it once the library is fixed
+  ([langgraph-redis#215](https://github.com/redis-developer/langgraph-redis/issues/215)). The old writes still stay
   in Redis until the thread expires.
 - **langgraph-checkpoint-redis** emits a deprecation warning about
   `get_async_redis_connection`; watch for a breaking release.
