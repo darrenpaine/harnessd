@@ -28,6 +28,9 @@ concurrent runs on one thread are prevented.
   across workers. The lock is released when the run ends, whatever its status, and
   expires on its own after `RUN_TIMEOUT_SECONDS` + 30 s so a crashed run cannot block a
   thread forever.
+- B-0006: A thread can pause for confirmation any number of times. Loading a
+  thread uses only the pending writes saved with its latest checkpoint, never
+  those left over from earlier steps, so each confirmation behaves like the first.
 
 ## Acceptance tests
 All use real Redis (SPEC-0005), never a checkpointer mock.
@@ -42,6 +45,11 @@ All use real Redis (SPEC-0005), never a checkpointer mock.
   confirm → the tool runs. -> `tests/test_checkpoint.py::test_pending_confirmation_survives_restart`
 - AT-0005 (B-0005): Lock is released after ok, error and timeout runs, and has an
   expiry while held. -> `tests/test_checkpoint.py::test_thread_lock_released`
+- AT-0006 (B-0006): On one thread, three messages that each make an add_note call,
+  answered with confirm true, confirm true and confirm false → each message returns
+  awaiting_confirmation, each confirm returns ok, two notes are written, the third
+  call's result is `rejected`, and GET (SPEC-0009) succeeds after every request.
+  -> `tests/test_checkpoint.py::test_repeated_confirmations`
 
 ## Non-goals
 Listing threads, migrating checkpoint formats. Reading, deleting and compacting

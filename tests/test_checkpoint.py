@@ -10,6 +10,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -26,12 +27,20 @@ from agent.persistence import (
     thread_lock,
     ttl_seconds,
 )
-from agent_support import Agent, note, tool_turn
+from agent_support import Agent, MakeClient, note, tool_turn
 from fakes import ScriptedChatModel
 from settings import Settings
 from tools.base import ToolContext
 
 pytestmark = pytest.mark.redis
+
+# Shown when AT-0006 fails: the likely cause is a library upgrade.
+PRIVATE_API_HINT = (
+    "repeated confirmations broke: agent.persistence.ShallowRedisSaver overrides "
+    "the private AsyncShallowRedisSaver._aload_pending_writes of "
+    "langgraph-checkpoint-redis; if the package was upgraded, check that the "
+    "override still applies (SPEC-0004 B-0006)"
+)
 
 
 @pytest.fixture
@@ -174,3 +183,44 @@ async def test_thread_lock_tolerates_expired_lock(
     async with thread_lock(redis, thread_id, settings):
         await redis.delete(lock_key(thread_id))  # as if it expired mid-run
     assert not await redis.exists(lock_key(thread_id))
+
+
+@pytest.mark.spec("SPEC-0004", "B-0006", "AT-0006")
+async def test_repeated_confirmations(
+    settings: Settings,
+    redis: Redis,
+    tool_context: ToolContext,
+    make_client: MakeClient,
+) -> None:
+    agent_settings = tool_context.settings.model_copy(
+        update={"redis_url": settings.redis_url}
+    )
+    guard = RedisThreadGuard(redis, agent_settings)
+    replies: list[AIMessage] = []
+    for text in ("one", "two", "three"):
+        replies += [tool_turn(note(text)), AIMessage(content=f"done {text}")]
+    thread_id = str(uuid.uuid4())
+
+    async def send(client: httpx.AsyncClient, body: dict[str, Any]) -> Any:
+        response = await client.post(
+            "/v1/agent/run", json={"thread_id": thread_id, **body}
+        )
+        state = await client.get(f"/v1/threads/{thread_id}")
+        assert response.status_code == 200, f"{PRIVATE_API_HINT}\n{response.text}"
+        assert state.status_code == 200, f"{PRIVATE_API_HINT}\n{state.text}"
+        return response.json()
+
+    async with open_checkpointer(agent_settings) as saver:
+        client, _ = make_client(replies, checkpointer=saver, guard=guard)
+        results = []
+        for text, approve in (("one", True), ("two", True), ("three", False)):
+            paused = await send(client, {"message": f"note: {text}"})
+            done = await send(client, {"confirm": approve})
+            results.append((paused["status"], done["status"]))
+
+    expected = [("awaiting_confirmation", "ok")] * 3
+    assert results == expected, PRIVATE_API_HINT
+    [rejected] = done["tool_calls"]
+    assert rejected["error"]["code"] == "rejected", PRIVATE_API_HINT
+    lines = agent_settings.notes_path.read_text().splitlines()
+    assert [line.split("\t")[-1] for line in lines] == ["one", "two"]

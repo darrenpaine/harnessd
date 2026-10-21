@@ -16,7 +16,7 @@ from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from redis.asyncio import Redis
 
-from agent.graph import SYSTEM_PROMPT
+from agent.graph import SYSTEM_PROMPT, thread_config
 from agent.persistence import (
     RedisThreadGuard,
     checkpoint_keys,
@@ -172,6 +172,35 @@ async def test_delete_thread(
     assert after.status_code == 404
     assert [m.content for m in agent.model.calls[-1][1:]] == ["new start"]
     assert missing.status_code == 404
+
+
+# LangGraph's id for writes made outside a task, as Command(update=...) makes.
+NULL_TASK_ID = "00000000-0000-0000-0000-000000000000"
+
+
+@pytest.mark.redis
+@pytest.mark.spec("SPEC-0009", "B-0002", "AT-0014")
+async def test_delete_unloadable_thread(
+    make_client: MakeClient, redis_settings: Settings, redis: Redis
+) -> None:
+    guard = RedisThreadGuard(redis, redis_settings)
+    async with open_checkpointer(redis_settings) as saver:
+        client, _ = make_client(replies("hi"), checkpointer=saver, guard=guard)
+        thread_id = await run(client, "hello")
+        latest = await saver.aget_tuple(thread_config(uuid.UUID(thread_id)))
+        assert latest is not None
+        # Two values for one channel in one step can't be applied.
+        clash = [("max_tool_calls", 1), ("max_tool_calls", 2)]
+        await saver.aput_writes(latest.config, clash, NULL_TASK_ID)
+
+        broken = await client.get(thread(thread_id))
+        deleted = await client.delete(thread(thread_id))
+        remaining = [k async for k in redis.scan_iter(match=f"*{thread_id}*")]
+
+    assert broken.status_code == 500
+    assert broken.json()["error"]["code"] == "internal"
+    assert deleted.status_code == 204
+    assert remaining == []
 
 
 @pytest.mark.spec("SPEC-0009", "B-0003", "AT-0005")

@@ -76,7 +76,7 @@ yet written.
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
-| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
+| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL; `ShallowRedisSaver` loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
 | `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver), `ToolFailure`, `call_tool()`. | SPEC-0003 B-0001..B-0003 | built |
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. | SPEC-0003 B-0005..B-0007 | built |
 | `src/agent/graph.py` | The agent loop: `model` node (cap and invalid-call checks), `tools` node (runs a turn's calls in order, stops before a side effect), `confirm` node (interrupt, then run or reject). `build_prompt` answers dangling calls and puts a compacted thread's summary in the system prompt. A run's input (`RunInput`) never carries the summary, so it survives later runs. | SPEC-0001 B-0002..B-0005, B-0007, SPEC-0009 B-0005 | built |
@@ -185,7 +185,7 @@ answers. The runner turns the final state into an `AgentResponse`.
 
 | Key | Written by | Expiry |
 |-----|-----------|--------|
-| `checkpoint:<thread>:…`, `checkpoint_write:<thread>:…` and related | `AsyncShallowRedisSaver` (latest state per thread only) | `CHECKPOINT_TTL_HOURS` (24 h), reset on every key after each run |
+| `checkpoint:<thread>:…`, `checkpoint_write:<thread>:…` and related | `ShallowRedisSaver`, our subclass of `AsyncShallowRedisSaver` (latest state per thread only) | `CHECKPOINT_TTL_HOURS` (24 h), reset on every key after each run |
 | `harnessd:lock:thread:<thread>` | `thread_lock()` | `RUN_TIMEOUT_SECONDS` + 30 s |
 
 The checkpointer sets a TTL only on keys it writes in the current run, so keys from
@@ -268,6 +268,15 @@ to every key containing the thread id (a UUID) after each run, except the lock k
   attach them to `agent.run` instead; `test_run_span_tree` would catch it.
 - **Langfuse stack** needs several GB of RAM (Postgres, ClickHouse, Redis, MinIO),
   so it runs only under the `observability` profile, never in CI.
+- **langgraph-checkpoint-redis private API**: version 0.5.2 loads every pending
+  write a thread ever made, not just the latest checkpoint's, so a second
+  confirmation on a thread failed with `InvalidUpdateError`. `ShallowRedisSaver`
+  overrides the private `_aload_pending_writes` and relies on the library's key
+  layout and write documents, so an upgrade can break it silently. Import fails
+  if the method disappears, and SPEC-0004 AT-0006
+  (`test_repeated_confirmations`) fails if it stops applying; re-check the class on
+  every upgrade, and drop it once the library is fixed. The old writes still stay
+  in Redis until the thread expires.
 - **langgraph-checkpoint-redis** emits a deprecation warning about
   `get_async_redis_connection`; watch for a breaking release.
 - **Traceability script** (SPEC-0006) isn't built yet, so gaps are checked by hand.
