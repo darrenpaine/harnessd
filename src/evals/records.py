@@ -77,10 +77,14 @@ class RunRecord(BaseModel):
     totals: RunTotals
 
 
+def model_key(provider: str, model: str) -> str:
+    """`<provider>__<model>`, safe as a file name; names a baseline file."""
+    return f"{provider}__{re.sub(r'[^A-Za-z0-9._-]', '-', model)}"
+
+
 def run_id(started_at: datetime, provider: str, model: str) -> str:
     """`<date>T<time>__<provider>__<model>`, safe as a file name."""
-    safe = re.sub(r"[^A-Za-z0-9._-]", "-", model)
-    return f"{started_at:%Y-%m-%dT%H%M%S}__{provider}__{safe}"
+    return f"{started_at:%Y-%m-%dT%H%M%S}__{model_key(provider, model)}"
 
 
 def write_run(record: RunRecord, directory: Path) -> Path:
