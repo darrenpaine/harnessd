@@ -19,7 +19,7 @@ review only).
 | # | Rule (do / don't) | Example | Checked by |
 |---|---|---|---|
 | 1 | Turn natural language into structured tool calls or typed output. Don't parse free text for decisions. | The model returns `{"tool": "search", "args": {...}}`, not "I will now search for…". | test: invalid output is rejected |
-| 2 | Keep prompts in the codebase as named constants or files, reviewed like code. A prompt change updates the tests or evals that cover it. Don't hide prompts inside a framework's defaults. | `SYSTEM_PROMPT` in the agent module; a diff to it shows in review. | review; eval on change |
+| 2 | Keep each prompt in its own file in `src/prompts/`, reviewed like code, including prompts for evals and judges. Code loads them through the `prompts` module; no prompt text inline in other modules. A prompt change updates the tests or evals that cover it. Don't hide prompts inside a framework's defaults. | `src/prompts/system.md`, loaded as `prompts.SYSTEM_PROMPT`; a diff to it shows in review. | review; eval on change |
 | 3 | Build the context explicitly in one function: system prompt, chosen history, retrieved data, errors. Bound its size (trim, summarise, or retrieve on demand). Never send secrets or unneeded data. | `build_prompt(state) -> messages`, with a test of what it includes and leaves out. | test |
 | 4 | Every tool has a typed input and output schema, validated at the boundary. Invalid model arguments become a structured error, not an exception or a guess. | Pydantic/JSON Schema models for each tool's args and result. | test |
 
