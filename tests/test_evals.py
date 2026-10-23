@@ -16,7 +16,7 @@ from redis.asyncio import Redis
 
 from agent.persistence import RedisThreadGuard, open_checkpointer
 from agent_support import LocalThreadGuard, fetch, note, tool_turn
-from evals.dataset import DatasetError, load_cases, select
+from evals.dataset import EvalDatabaseError, load_cases, select
 from evals.records import Attempt, RunRecord, TurnResult, write_run
 from evals.runner import CaseRunner, run_cases
 from evals.scoring import case_score, check_turn, score_case
@@ -101,7 +101,7 @@ def test_dataset_validation(tmp_path: Path) -> None:
         ),
     )
 
-    with pytest.raises(DatasetError) as raised:
+    with pytest.raises(EvalDatabaseError) as raised:
         load_cases(cases)
 
     problems = raised.value.problems

@@ -9,7 +9,7 @@ from schemas import EvalCase
 from tools.base import summarize
 
 
-class DatasetError(Exception):
+class EvalDatabaseError(Exception):
     """The dataset has invalid lines or duplicate ids; nothing may run."""
 
     def __init__(self, problems: Sequence[str]) -> None:
@@ -19,7 +19,7 @@ class DatasetError(Exception):
 
 def load_cases(directory: Path) -> list[EvalCase]:
     """Every case in `directory/*.jsonl`, in file then line order. Raises
-    DatasetError naming the file and line of every problem."""
+    EvalDatabaseError naming the file and line of every problem."""
     problems: list[str] = []
     cases: list[EvalCase] = []
     seen: dict[str, str] = {}
@@ -42,7 +42,7 @@ def load_cases(directory: Path) -> list[EvalCase]:
             seen[case.id] = where
             cases.append(case)
     if problems:
-        raise DatasetError(problems)
+        raise EvalDatabaseError(problems)
     return cases
 
 

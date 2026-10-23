@@ -52,7 +52,7 @@ async def run(args: argparse.Namespace) -> int:
 
     from agent.llm import build_chat_model
     from agent.persistence import REDIS_ERRORS, RedisThreadGuard, open_checkpointer
-    from evals.dataset import DatasetError, load_cases, select
+    from evals.dataset import EvalDatabaseError, load_cases, select
     from evals.records import write_run
     from evals.runner import CaseRunner, run_cases
     from logs import configure_logging
@@ -61,7 +61,7 @@ async def run(args: argparse.Namespace) -> int:
     # B-0001: an invalid dataset stops the run before any model call.
     try:
         cases = load_cases(ROOT / args.cases)
-    except DatasetError as exc:
+    except EvalDatabaseError as exc:
         print("invalid eval dataset:", *exc.problems, sep="\n  ", file=sys.stderr)
         return 2
     chosen = select(cases, args.tag, args.case)
