@@ -16,7 +16,7 @@ from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from redis.asyncio import Redis
 
-from agent.graph import SYSTEM_PROMPT, thread_config
+from agent.graph import thread_config
 from agent.persistence import (
     RedisThreadGuard,
     checkpoint_keys,
@@ -28,6 +28,7 @@ from api.deps import get_model
 from app import app
 from fakes import RaisingChatModel, ScriptedChatModel
 from logs import ROOT
+from prompts import SYSTEM_PROMPT
 from settings import Settings, get_settings
 from tools.base import ToolContext
 

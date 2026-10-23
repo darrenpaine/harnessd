@@ -26,6 +26,7 @@ from langgraph.types import StateSnapshot
 from agent.graph import AgentGraph, thread_config
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, log_context
+from prompts import SUMMARY_PROMPT
 from schemas import (
     CompactResponse,
     PendingAction,
@@ -35,12 +36,6 @@ from schemas import (
 )
 from settings import Settings
 from tracing import thread_span
-
-SUMMARY_PROMPT = (
-    "Summarise the conversation below for an assistant that will continue it. "
-    "Keep the facts, decisions, open questions and tool results it may need; "
-    "fold in the earlier summary if there is one. Reply with the summary only."
-)
 
 log = get_logger("threads")
 

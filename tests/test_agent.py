@@ -9,7 +9,6 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent.graph import (
-    SYSTEM_PROMPT,
     AgentState,
     build_prompt,
     run_counters,
@@ -17,6 +16,7 @@ from agent.graph import (
 )
 from agent.persistence import ThreadBusyError
 from agent_support import PAGE_TEXT, Agent, fetch, tool_turn
+from prompts import SYSTEM_PROMPT
 from schemas import FetchSiteCall, WebSearchCall
 from tools import TOOLS
 from tools.base import ToolContext
