@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     otel_exporter_otlp_headers: SecretStr | None = None
     trace_content: bool = True
 
+    # Evals (SPEC-0011)
+    eval_repeats: int = Field(default=3, ge=1)
+
     @field_validator("log_level", "log_format", mode="before")
     @classmethod
     def _lower_log_level(cls, value: object) -> object:

@@ -33,6 +33,8 @@ openapi:
 	uv run python scripts/export_openapi.py
 trace:
 	uv run python scripts/trace.py
+evals:  # needs Redis; ARGS="--tag confirmation --repeats 1" for a partial run (SPEC-0011)
+	uv run python scripts/run_evals.py $(ARGS)
 
 ## Git checks
 pre-commit:

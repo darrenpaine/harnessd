@@ -1,4 +1,5 @@
-"""Pydantic models for the API (SPEC-0002, SPEC-0009) and tool I/O (SPEC-0003)."""
+"""Pydantic models for the API (SPEC-0002, SPEC-0009), tool I/O (SPEC-0003) and
+eval cases (SPEC-0011)."""
 
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
@@ -388,3 +389,91 @@ class ApiError(_Model):
 
 class HealthResponse(_Model):
     status: Literal["ok"] = "ok"
+
+
+# --- Evals (SPEC-0011) ------------------------------------------------------
+
+EvalCaseId = Annotated[str, StringConstraints(pattern=r"^EV-\d{4}$")]
+SpecRef = Annotated[str, StringConstraints(pattern=r"^SPEC-\d{4} B-\d{4}$")]
+ToolResult = Literal["ok"] | ToolErrorCode
+
+
+class EvalTurn(_Model):
+    """One request on the case's thread: a message or a confirmation decision."""
+
+    message: str | None = None
+    confirm: bool | None = None
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> Self:
+        if (self.message is None) == (self.confirm is None):
+            raise ValueError("a turn has exactly one of message or confirm")
+        return self
+
+
+class TextMatch(_Model):
+    """How a tool argument must match; exactly one form."""
+
+    contains: str | None = None
+    equals: Any = None
+    regex: str | None = None
+
+    @model_validator(mode="after")
+    def _one_form(self) -> Self:
+        if len(self.model_fields_set) != 1:
+            raise ValueError("give exactly one of contains, equals or regex")
+        return self
+
+
+class EvalExpect(_Model):
+    """Checks on one turn's response; the final turn unless `turn` is set."""
+
+    turn: int | None = Field(default=None, ge=0)
+    status: RunStatus | None = None
+    tools_called: list[ToolName] | None = None
+    tools_called_any_order: bool = False
+    tools_not_called: list[ToolName] | None = None
+    args: dict[ToolName, dict[str, TextMatch]] | None = None
+    tool_results: dict[ToolName, ToolResult] | None = None
+    answer_contains: list[str] | None = None
+    answer_excludes: list[str] | None = None
+    answer_regex: str | None = None
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_latency_ms: int | None = Field(default=None, gt=0)
+
+
+class StubOutputs(_Model):
+    """Canned results for stubbed tools: the tool's output, or a ToolError."""
+
+    web_search: WebSearchOutput | ToolError | None = None
+    fetch_site: FetchSiteOutput | ToolError | None = None
+    add_note: AddNoteOutput | ToolError | None = None
+
+
+class EvalCase(_Model):
+    """One eval case: turns on one thread and what to expect (SPEC-0011)."""
+
+    id: EvalCaseId
+    description: str
+    tags: list[str] = []
+    specs: list[SpecRef] = []
+    must_pass: bool = False
+    turns: list[EvalTurn] = Field(min_length=1)
+    tools: Literal["stub", "live"] = "stub"
+    tool_outputs: StubOutputs = StubOutputs()
+    expect: EvalExpect | list[EvalExpect] = EvalExpect()
+    rubric: str | None = None
+
+    @model_validator(mode="after")
+    def _turns_exist(self) -> Self:
+        for block in self.expect_blocks:
+            if block.turn is not None and block.turn >= len(self.turns):
+                raise ValueError(
+                    f"expect turn {block.turn} is past the last turn "
+                    f"({len(self.turns) - 1})"
+                )
+        return self
+
+    @property
+    def expect_blocks(self) -> list[EvalExpect]:
+        return self.expect if isinstance(self.expect, list) else [self.expect]
