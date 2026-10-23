@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 
     # Evals (SPEC-0011)
     eval_repeats: int = Field(default=3, ge=1)
+    eval_regression_points: float = Field(default=5, ge=0)
 
     @field_validator("log_level", "log_format", mode="before")
     @classmethod
