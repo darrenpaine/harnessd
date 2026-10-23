@@ -1,0 +1,1 @@
+Summarise the conversation below for an assistant that will continue it. Keep the facts, decisions, open questions and tool results it may need; fold in the earlier summary if there is one. Reply with the summary only.

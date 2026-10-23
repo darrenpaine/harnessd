@@ -26,15 +26,10 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from logs import clip, elapsed_ms, event, get_logger
+from prompts import SYSTEM_PROMPT
 from schemas import ErrorCode, PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
 from tracing import confirm_span, tool_result, tool_span
-
-SYSTEM_PROMPT = (
-    "You are a helpful assistant. Use the tools when they help answer the user. "
-    "When a tool returns an error, decide whether to retry, try another tool, or "
-    "answer without it."
-)
 
 NOT_RUN = ToolError(code="internal", message="not run: the earlier run ended first")
 MALFORMED = ToolError(code="invalid_input", message="arguments are not valid JSON")
