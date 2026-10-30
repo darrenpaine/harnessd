@@ -294,7 +294,7 @@ class AgentResponse(_Model):
 
 # --- Threads (SPEC-0009) -------------------------------------------------------
 
-ThreadStatus = Literal["idle", "awaiting_confirmation"]
+ThreadStatus = Literal["idle", "awaiting_confirmation", "unfinished"]
 
 
 class ThreadToolCall(_Model):
@@ -322,7 +322,10 @@ class ThreadState(_Model):
     """A thread's latest saved state (SPEC-0009 B-0001)."""
 
     thread_id: UUID = Field(description="The thread.")
-    status: ThreadStatus = Field(description="Whether an action awaits confirmation.")
+    status: ThreadStatus = Field(
+        description="idle: ready for a message; awaiting_confirmation: paused on a "
+        "pending action; unfinished: the last run stopped part way (B-0011)."
+    )
     pending_action: PendingAction | None = Field(
         default=None,
         description="The action waiting for confirmation; set only when status "
@@ -355,7 +358,6 @@ AgentThreadStatus = Literal["idle", "awaiting_confirmation", "unfinished"]
 
 class AgentThreadState(_Model):
     """A thread's graph state as AgentThreads reports it. Unlike ThreadState it
-    tells an unfinished run (graph steps pending after a timeout) from idle, and
     keeps the messages as the model sees them."""
 
     status: AgentThreadStatus
