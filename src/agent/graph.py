@@ -3,6 +3,7 @@
 import logging
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
 from langchain_core.language_models import BaseChatModel
@@ -139,6 +140,62 @@ def _call_ids(message: AIMessage) -> list[str]:
     return [call["id"] for call in calls if call["id"]]
 
 
+@dataclass(frozen=True)
+class Answer:
+    """The model answered; the run ends ok."""
+
+
+@dataclass(frozen=True)
+class Stop:
+    """The run ends early with this outcome."""
+
+    outcome: Outcome
+
+
+@dataclass(frozen=True)
+class RunCalls:
+    """Queue the turn's calls; `invalid` if any can't run."""
+
+    invalid: bool
+
+
+Verdict = Answer | Stop | RunCalls
+
+
+def model_turn(reply: AIMessage, state: AgentState, calls: ToolCalls) -> Verdict:
+    """What a model turn leads to (SPEC-0001 B-0002, B-0004). The checks run
+    in this order: no calls, invalid calls twice in a row, over the cap."""
+    requested = len(reply.tool_calls) + len(reply.invalid_tool_calls)
+    if not requested:
+        if str(reply.text).strip():
+            return Answer()
+        return Stop(
+            Outcome(
+                status="error",
+                code="model_output_invalid",
+                message="the model gave no answer",
+            )
+        )
+
+    invalid = bool(reply.invalid_tool_calls) or any(
+        calls.check(call) is not None for call in reply.tool_calls
+    )
+    if invalid and state["invalid_turns"] >= 1:
+        return Stop(
+            Outcome(
+                status="error",
+                code="model_output_invalid",
+                message="the model sent invalid tool calls twice in a row",
+            )
+        )
+
+    if state["calls_used"] + requested > state["max_tool_calls"]:
+        answer = str(reply.text).strip() or None
+        return Stop(Outcome(status="truncated", answer=answer))
+
+    return RunCalls(invalid=invalid)
+
+
 def _step(node: str) -> None:
     event(log, logging.INFO, "graph.step", node=node)
 
@@ -158,7 +215,6 @@ def build_graph(
         started = time.perf_counter()
         reply = await bound.ainvoke(build_prompt(state))
         assert isinstance(reply, AIMessage)
-        text = str(reply.text).strip()
         requested = len(reply.tool_calls) + len(reply.invalid_tool_calls)
         event(
             log,
@@ -167,40 +223,21 @@ def build_graph(
             tool_calls=requested,
             ms=elapsed_ms(started),
         )
-        update: dict[str, Any] = {"messages": [reply]}
-
-        if not requested:
-            if text:
-                return Command(update=update, goto=END)
-            update["outcome"] = Outcome(
-                status="error",
-                code="model_output_invalid",
-                message="the model gave no answer",
-            )
-            return Command(update=update, goto=END)
-
-        invalid = bool(reply.invalid_tool_calls) or any(
-            calls.check(call) is not None for call in reply.tool_calls
-        )
-        if invalid and state["invalid_turns"] >= 1:
-            update["outcome"] = Outcome(
-                status="error",
-                code="model_output_invalid",
-                message="the model sent invalid tool calls twice in a row",
-            )
-            return Command(update=update, goto=END)
-
-        if state["calls_used"] + requested > state["max_tool_calls"]:
-            update["outcome"] = Outcome(status="truncated", answer=text or None)
-            return Command(update=update, goto=END)
-
-        update |= {
-            "messages": [reply, *calls.malformed(reply)],
-            "queue": reply.tool_calls,
-            "calls_used": state["calls_used"] + requested,
-            "invalid_turns": state["invalid_turns"] + 1 if invalid else 0,
-        }
-        return Command(update=update, goto="tools")
+        match model_turn(reply, state, calls):
+            case Answer():
+                return Command(update={"messages": [reply]}, goto=END)
+            case Stop(outcome):
+                return Command(
+                    update={"messages": [reply], "outcome": outcome}, goto=END
+                )
+            case RunCalls(invalid):
+                update: dict[str, Any] = {
+                    "messages": [reply, *calls.malformed(reply)],
+                    "queue": reply.tool_calls,
+                    "calls_used": state["calls_used"] + requested,
+                    "invalid_turns": state["invalid_turns"] + 1 if invalid else 0,
+                }
+                return Command(update=update, goto="tools")
 
     async def run_tools(state: AgentState) -> Command[str]:
         """Run queued calls in order, stopping before a side effect (B-0005)."""
