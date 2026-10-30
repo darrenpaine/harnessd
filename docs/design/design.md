@@ -49,7 +49,8 @@ flowchart LR
     client -->|/docs, /redoc| api
     api -->|AgentRequest| runner[Agent runner<br/>src/agent/runner.py]
     runner -->|thread lock, TTL refresh| redis[(Redis 8.2)]
-    runner --> graph_node[LangGraph agent<br/>src/agent/graph.py]
+    runner -->|start, resume| agent_threads[Agent threads<br/>src/agent/agent_threads.py]
+    agent_threads --> graph_node[LangGraph agent<br/>src/agent/graph.py]
     graph_node <-->|checkpoints| redis
     graph_node --> llm[Chat model<br/>src/agent/llm.py]
     llm -.-> providers[Ollama / Claude / Gemini]
@@ -73,18 +74,19 @@ yet written.
 | `src/api/agent.py`, `src/api/threads.py`, `src/api/health.py` | One `APIRouter` per area: `POST /v1/agent/run` (turns `ConfirmationStateError` into 422); `GET`/`DELETE /v1/threads/{id}` and `POST /v1/threads/{id}/compact`; `GET /health`. | SPEC-0002, SPEC-0009 | built |
 | `src/api/deps.py` | `Services` builds the Redis client, chat model and graph on first use, so the app starts while Redis is down. Dependencies `get_settings` → `get_graph` / `get_guard` / `get_model` → `get_runner` / `get_threads`; tests override the graph, guard and model. | SPEC-0002, SPEC-0009 | built |
 | `src/api/errors.py` | Exception handlers: `ThreadBusyError`, `ThreadAwaitingConfirmationError` and `ThreadRunUnfinishedError` → 409, `ThreadNotFoundError` → 404, `SummaryError` → 500, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
-| `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
+| `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState, AgentThreadState (a thread's status, pending action, messages and summary as `AgentThreads` reports it) and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. | SPEC-0001 B-0001 | built |
 | `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL; `ShallowRedisSaver` loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
 | `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver), `ToolFailure`, `call_tool()`. | SPEC-0003 B-0001..B-0003 | built |
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. | SPEC-0003 B-0005..B-0007 | built |
 | `src/agent/graph.py` | The agent loop: `model` node (cap and invalid-call checks), `tools` node (runs a turn's calls in order, stops before a side effect), `confirm` node (interrupt, then run or reject). `build_prompt` answers dangling calls and puts a compacted thread's summary in the system prompt. A run's input (`RunInput`) never carries the summary, so it survives later runs. | SPEC-0001 B-0002..B-0005, B-0007, SPEC-0009 B-0005 | built |
-| `src/prompts/` | One file per prompt (`system.md`, `summary.md`); `prompts.load()` reads them at import, so a missing file fails at startup. The graph and the thread service import `SYSTEM_PROMPT` and `SUMMARY_PROMPT` from here. | SPEC-0001, SPEC-0009 B-0005 | review |
-| `src/agent/runner.py` | What the API calls: `ThreadGuard.hold` (lock) → confirmation rules → graph run under `RUN_TIMEOUT_SECONDS` → `ThreadGuard.touch` (TTL) → `AgentResponse`. Raises `ThreadBusyError` and `ConfirmationStateError`; dependency errors propagate for the API to map to 503. | SPEC-0001 B-0006, SPEC-0002 B-0003, SPEC-0004 | built |
-| `src/agent/threads.py` | `ThreadService`: read a thread's state (no lock, no TTL reset); delete it (lock → `adelete_thread`); compact it (lock → summary call under `RUN_TIMEOUT_SECONDS` → `RemoveMessage` for whole turns + `summary` via `aupdate_state` → TTL reset). | SPEC-0009 | built |
-| `src/evals/` | The eval harness: `dataset.py` loads and validates `evals/cases/*.jsonl`; `stubs.py` swaps each tool's run for a canned result, keeping its schema and side-effect flag; `runner.py` runs each repeat of a case on a new thread through `AgentRunner` and deletes the thread after, counting tokens with LangChain's usage callback; `scoring.py` checks each turn, scores repeats and totals; `records.py` holds the run file; `report.py` accepts baselines, gates a full run on must_pass failures and drops below the baseline, and renders `evals/REPORT.md` from the run files. | SPEC-0011 B-0001..B-0005, B-0008 | review |
-| `scripts/run_evals.py` | `make evals`: validates the dataset and checks Redis before any model call, runs the cases on the configured model and the Redis checkpointer, writes `evals/runs/<run id>.json`, regenerates `evals/REPORT.md` and exits 1 when a full run fails the gate. `make evals-baseline` accepts the model's latest full run; `make evals-report` only rebuilds the report. | SPEC-0011 | review |
+| `src/prompts/` | One file per prompt (`system.md`, `summary.md`); `prompts.load()` reads them at import, so a missing file fails at startup. The graph and the thread service import `SYSTEM_PROMPT` and `SUMMARY_PROMPT` from here. | SPEC-0001, SPEC-0009 B-0005 | built |
+| `src/agent/agent_threads.py` | `AgentThreads`: the only module that reads or changes the graph's thread state. `state(id)` → `AgentThreadState` (idle, awaiting confirmation or unfinished) or `None` when missing; `start(id, message, max_tool_calls)` and `resume(id, approved, max_tool_calls)` run the graph and return an `AgentResponse`, raising `ConfirmationStateError` when the thread's status doesn't allow it; `tool_calls(id)` for a timed-out run; `replace_history(id, removed, summary)` for compaction; `delete(id)` → whether it existed, without loading the state. Hides the thread config, `RunInput`, the run-counter reset, `Command(resume=…)`, `__interrupt__` and `Outcome`. No lock, TTL, timeout, logging or tracing. | SPEC-0001 B-0005, B-0007, SPEC-0002 B-0003, SPEC-0004 B-0006, SPEC-0009 | planned |
+| `src/agent/runner.py` | What the API calls: `ThreadGuard.hold` (lock) → `AgentThreads.start` / `resume` under `RUN_TIMEOUT_SECONDS` (on timeout, an error response with `AgentThreads.tool_calls`) → `ThreadGuard.touch` (TTL) → `AgentResponse`. Logs and traces the run. `ThreadBusyError` and `ConfirmationStateError` propagate; so do dependency errors, for the API to map to 503. | SPEC-0001 B-0006, SPEC-0002 B-0003, SPEC-0004 | built |
+| `src/agent/threads.py` | `ThreadService`: read a thread (`AgentThreads.state`; no lock, no TTL reset; an unfinished run reads as `idle`, since SPEC-0009 has no unfinished status); delete it (lock → `AgentThreads.delete`); compact it (lock → refuse unless idle → `compaction_cut` → summary call under `RUN_TIMEOUT_SECONDS` → `AgentThreads.replace_history` → TTL reset). | SPEC-0009 | built |
+| `src/evals/` | The eval harness: `dataset.py` loads and validates `evals/cases/*.jsonl`; `stubs.py` swaps each tool's run for a canned result, keeping its schema and side-effect flag; `runner.py` runs each repeat of a case on a new thread through `AgentRunner` and deletes the thread after with `AgentThreads.delete`, counting tokens with LangChain's usage callback; `scoring.py` checks each turn, scores repeats and totals; `records.py` holds the run file; `report.py` accepts baselines, gates a full run on must_pass failures and drops below the baseline, and renders `evals/REPORT.md` from the run files. | SPEC-0011 B-0001..B-0005, B-0008 | built |
+| `scripts/run_evals.py` | `make evals`: validates the dataset and checks Redis before any model call, runs the cases on the configured model and the Redis checkpointer, writes `evals/runs/<run id>.json`, regenerates `evals/REPORT.md` and exits 1 when a full run fails the gate. `make evals-baseline` accepts the model's latest full run; `make evals-report` only rebuilds the report. | SPEC-0011 | built |
 | `scripts/export_openapi.py` | Writes `docs/openapi.json` (`make openapi`). | SPEC-0007 B-0006 | built |
 | `scripts/trace.py` | Builds `docs/traceability.md` from specs and test markers and flags gaps (`make trace`; run in CI). | SPEC-0006 | built |
 | `tests/fakes.py` | `ScriptedChatModel`: replays scripted replies, records inputs. | SPEC-0005 B-0002 | built |
@@ -110,7 +112,7 @@ sequenceDiagram
     A->>A: validate AgentRequest (else 422, no LLM call)
     A->>R: run(request)
     R->>D: take lock harnessd:lock:thread:{id} (else 409 thread_busy)
-    R->>G: invoke under RUN_TIMEOUT_SECONDS
+    R->>G: AgentThreads.start under RUN_TIMEOUT_SECONDS
     G->>D: load latest checkpoint (unknown/expired id → new thread)
     loop until answer, cap, or side effect
         G->>M: messages + tool schemas
@@ -129,7 +131,7 @@ sequenceDiagram
     C->>A: POST /v1/agent/run {thread_id, confirm: true}
     A->>R: run(request)
     R->>D: take lock
-    R->>G: Command(resume=true)
+    R->>G: AgentThreads.resume (Command(resume=true))
     G->>T: call_tool(add_note) once
     G->>M: continue with the tool result
     G-->>R: run result
@@ -168,7 +170,9 @@ The state carries the thread's `messages`, the `queue` of calls from the latest 
 turn that have not run yet, the run counters (`max_tool_calls`, `calls_used`,
 `trace`, `outcome`, reset on each request) and `invalid_turns`. A paused `confirm`
 keeps its `queue` in the checkpoint, so the calls after it run once the user
-answers. The runner turns the final state into an `AgentResponse`.
+answers. `AgentThreads` turns the final state into an `AgentResponse`, and is the
+only module that reads these fields; the runner, the thread service and the eval
+runner see a thread only through its interface.
 
 ### Data models and storage
 **API** (`src/schemas.py`, SPEC-0002):
@@ -243,6 +247,10 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 ## Decision
 - One LangGraph agent behind a runner that owns the lock, timeout and TTL refresh, so
   the API layer stays thin and testable with a fake runner.
+- One module, `AgentThreads`, owns the graph's thread state: status, runs, history
+  and deletion. Before it, the runner, the thread service and the eval runner each
+  read LangGraph's snapshot layout, and a thread's status was worked out in five
+  places. Trade-off: one more module between the runner and the graph.
 - Redis 8.2 with the shallow checkpointer and an explicit TTL refresh; a Redis lock
   per thread. Trade-off: a `SCAN` per run and a dependency on Redis modules.
 - Tools follow one contract and never raise; side effects need confirmation through
