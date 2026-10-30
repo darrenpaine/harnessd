@@ -1,9 +1,10 @@
-"""Pydantic models for the API (SPEC-0002, SPEC-0009), tool I/O (SPEC-0003) and
-eval cases (SPEC-0011)."""
+"""Pydantic models for the API (SPEC-0002, SPEC-0009), tool I/O (SPEC-0003),
+a thread's graph state (AgentThreads) and eval cases (SPEC-0011)."""
 
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
+from langchain_core.messages import BaseMessage
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -337,6 +338,30 @@ class ThreadState(_Model):
         default=None,
         description="Seconds until the thread expires; null if it does not.",
     )
+
+    @model_validator(mode="after")
+    def _pending_matches_status(self) -> Self:
+        if (self.status == "awaiting_confirmation") != (
+            self.pending_action is not None
+        ):
+            raise ValueError(
+                "pending_action is set only when status is 'awaiting_confirmation'"
+            )
+        return self
+
+
+AgentThreadStatus = Literal["idle", "awaiting_confirmation", "unfinished"]
+
+
+class AgentThreadState(_Model):
+    """A thread's graph state as AgentThreads reports it. Unlike ThreadState it
+    tells an unfinished run (graph steps pending after a timeout) from idle, and
+    keeps the messages as the model sees them."""
+
+    status: AgentThreadStatus
+    pending_action: PendingAction | None = None
+    summary: str | None = None
+    messages: list[BaseMessage]
 
     @model_validator(mode="after")
     def _pending_matches_status(self) -> Self:
