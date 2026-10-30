@@ -42,14 +42,20 @@ CI runs lint, types, and tests on every push. Keep all three green. Check this l
 5. Reference spec ids in tests (e.g. `@pytest.mark.spec("SPEC-0001", "B-0002")`) so
    requirements stay traceable to tests.
 
+A refactor changes structure, not behavior, so its specs stay as they are. If it
+changes the design, update `docs/design/design.md` first and ask me to review it,
+as for a spec. If it turns out to change behavior, stop and update the spec first.
+
 ## Workflow: branches and pull requests
-- Never commit directly to `main`. Start each feature or fix on a new branch from
+- Never commit directly to `main`. Start each feature, fix or refactor on a new branch from
   an up-to-date `main`: `git switch main && git pull && git switch -c <type>/<short-name>`
-  (types: `feat/`, `fix/`, `docs/`, `chore/`; e.g. `feat/settings`).
-- One branch per spec slice or concern. Keep the "small commits" rule within the branch.
+  (types: `feat/`, `fix/`, `refactor/`, `docs/`, `chore/`; e.g. `feat/settings`).
+  `refactor/` is for changes in structure with no change in behavior.
+- One branch per spec slice, refactor or concern. Keep the "small commits" rule within the branch.
 - Before opening a PR, run `uv run pre-commit run --all-files` and the full test suite.
 - Push with `git push -u origin <branch>` and open a PR to `main` with `gh pr create`.
-  The PR description lists the spec ids it covers (e.g. SPEC-0001 B-0004, AT-0006).
+  The PR description lists the spec ids it covers (e.g. SPEC-0001 B-0004, AT-0006);
+  a refactor PR lists the specs whose behavior it keeps and the tests that show it.
   Do not add a "Generated with Claude Code" line or any other Claude attribution.
 - Merge only after CI is green and I've approved. I merge; don't merge your own PR
   unless I ask. Delete the branch after merge.
