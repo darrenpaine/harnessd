@@ -21,6 +21,8 @@ and persistence are SPEC-0004.
 Provider-agnostic tool-calling chat model chosen by settings
 (`LLM_PROVIDER` = ollama | anthropic | google, `LLM_MODEL`, provider keys).
 Ollama is the local default. Built by `build_chat_model()` in `src/agent/llm.py`.
+`LLM_REQUESTS_PER_MINUTE` (int ≥ 1, unset by default) paces the model's calls to
+fit a provider quota, such as a free tier's requests-per-minute limit (B-0008).
 
 ## Behavior
 - B-0001: The LLM provider is selected by settings; no code change is needed to switch
@@ -51,6 +53,13 @@ Ollama is the local default. Built by `build_chat_model()` in `src/agent/llm.py`
   tool calls from earlier turns that never ran are shown to the model as ToolError
   `internal` ("not run"), so the history the provider sees is always well formed.
 
+- B-0008: With `LLM_REQUESTS_PER_MINUTE` = N, each model built by
+  `build_chat_model()` starts its calls at least 60/N seconds apart, with no
+  bursts; a call waits for its turn instead of being sent and refused by the
+  provider. The wait counts towards `RUN_TIMEOUT_SECONDS` (B-0006). Each built
+  model has its own pacing, as provider quotas are per model. Unset means no
+  pacing.
+
 ## Acceptance tests
 All use a scripted fake model (SPEC-0005).
 - AT-0001 (B-0001): Settings for each provider build the matching chat model without
@@ -78,6 +87,10 @@ All use a scripted fake model (SPEC-0005).
 - AT-0010 (B-0007): After a truncated run, the next message's model call receives a
   ToolError `internal` for each call that never ran.
   -> `tests/test_agent.py::test_thread_usable_after_truncation`
+- AT-0011 (B-0008): Settings for each provider with `LLM_REQUESTS_PER_MINUTE=600`
+  build a model whose calls are spaced 0.1 s apart with no burst, and without
+  the setting a model with no pacing; no network calls.
+  -> `tests/test_settings.py::test_provider_rate_limit`
 
 ## Non-goals
 Multi-agent routing, streaming, model fallback between providers.
