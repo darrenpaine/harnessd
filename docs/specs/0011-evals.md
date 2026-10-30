@@ -147,7 +147,10 @@ Runs need Redis (`make redis`), as the redis tests do.
 `EVAL_JUDGE` (`chat`; unset → no judge), `EVAL_JUDGE_PROVIDER` (default
 `LLM_PROVIDER`), `EVAL_JUDGE_MODEL` (e.g. `gemma4:12b` on Ollama; required with a
 judge), `EVAL_JUDGE_MIN_CONFIDENCE` (default 0.7). The judge model uses the
-provider's existing settings (keys, `OLLAMA_BASE_URL`).
+provider's existing settings (keys, `OLLAMA_BASE_URL`). On a provider with a
+requests-per-minute quota, such as a free tier, set `LLM_REQUESTS_PER_MINUTE`
+(SPEC-0001 B-0008) so the evaluated and judge models wait instead of failing
+cases with rate-limit errors.
 
 ## Behavior
 - B-0001: Every case line validates against EvalCase; ids are unique. An invalid

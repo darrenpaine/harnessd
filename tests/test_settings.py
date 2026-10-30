@@ -1,4 +1,4 @@
-"""Settings and model provider selection (SPEC-0001 B-0001)."""
+"""Settings and model provider selection (SPEC-0001 B-0001, B-0008)."""
 
 from pathlib import Path
 from typing import Any
@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from pydantic import ValidationError
@@ -26,40 +27,53 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LLM_MODEL",
         "ANTHROPIC_API_KEY",
         "GOOGLE_API_KEY",
+        "LLM_REQUESTS_PER_MINUTE",
         "RUN_TIMEOUT_SECONDS",
         "CHECKPOINT_TTL_HOURS",
     ):
         monkeypatch.delenv(name, raising=False)
 
 
+PROVIDERS: list[tuple[dict[str, Any], type[BaseChatModel]]] = [
+    ({"llm_provider": "ollama", "llm_model": "llama3.1"}, ChatOllama),
+    (
+        {
+            "llm_provider": "anthropic",
+            "llm_model": "claude-sonnet-5-5",
+            "anthropic_api_key": "test-key",
+        },
+        ChatAnthropic,
+    ),
+    (
+        {
+            "llm_provider": "google",
+            "llm_model": "gemini-3.5-flash-lite",
+            "google_api_key": "test-key",
+        },
+        ChatGoogleGenerativeAI,
+    ),
+]
+
+
 @pytest.mark.spec("SPEC-0001", "B-0001", "AT-0001")
-@pytest.mark.parametrize(
-    ("values", "expected"),
-    [
-        ({"llm_provider": "ollama", "llm_model": "llama3.1"}, ChatOllama),
-        (
-            {
-                "llm_provider": "anthropic",
-                "llm_model": "claude-sonnet-5-5",
-                "anthropic_api_key": "test-key",
-            },
-            ChatAnthropic,
-        ),
-        (
-            {
-                "llm_provider": "google",
-                "llm_model": "gemini-3.5-flash-lite",
-                "google_api_key": "test-key",
-            },
-            ChatGoogleGenerativeAI,
-        ),
-    ],
-)
+@pytest.mark.parametrize(("values", "expected"), PROVIDERS)
 def test_provider_selection(
     values: dict[str, Any], expected: type[BaseChatModel]
 ) -> None:
     model = build_chat_model(_settings(**values))
     assert isinstance(model, expected)
+
+
+@pytest.mark.spec("SPEC-0001", "B-0008", "AT-0011")
+@pytest.mark.parametrize("values", [values for values, _ in PROVIDERS])
+def test_provider_rate_limit(values: dict[str, Any]) -> None:
+    paced = build_chat_model(_settings(**values, llm_requests_per_minute=600))
+    limiter = paced.rate_limiter
+    assert isinstance(limiter, InMemoryRateLimiter)
+    assert limiter.requests_per_second == 10  # one call every 0.1 s
+    assert limiter.max_bucket_size == 1  # no burst
+
+    assert build_chat_model(_settings(**values)).rate_limiter is None
 
 
 @pytest.mark.spec("SPEC-0001", "B-0001")
