@@ -26,7 +26,9 @@ documented like the other operations (SPEC-0007 B-0003, B-0004) under the tag
 
 ### ThreadState
 - thread_id: UUID
-- status: `"idle"` | `"awaiting_confirmation"`
+- status: `"idle"` | `"awaiting_confirmation"` | `"unfinished"` — idle: ready for a
+  message; awaiting_confirmation: paused on a pending action; unfinished: the last
+  run stopped part way (B-0011).
 - pending_action: PendingAction | null — set only when awaiting confirmation.
 - summary: str | null — the summary written by the last compaction, if any.
 - messages: list[ThreadMessage], oldest first, after the summary.
@@ -86,9 +88,10 @@ The system prompt and the run counters (calls used, queued calls) are not return
 - B-0009: Each endpoint logs one info event (SPEC-0008): `thread.read`,
   `thread.deleted`, `thread.compacted` (messages_removed, ms).
 - B-0011: A thread whose last run stopped part way (it timed out between graph
-  steps, so steps are still pending) cannot be compacted: 409 with code
-  `thread_run_unfinished` and the state unchanged. The next message runs the
-  thread to its end, after which it can be compacted.
+  steps, so steps are still pending) has status `unfinished` in `GET`, and cannot
+  be compacted: 409 with code `thread_run_unfinished` and the state unchanged. The
+  next message runs the thread to its end, after which it is idle and can be
+  compacted.
 - B-0010: The three operations are documented as SPEC-0007 B-0003 and B-0004
   require, under the tag `threads`, and `docs/openapi.json` is regenerated
   (SPEC-0007 B-0006).
@@ -131,9 +134,10 @@ use real Redis (SPEC-0005).
   thread id; `thread.compacted` has messages_removed and ms.
   -> `tests/test_threads.py::test_thread_events_logged`
 - AT-0013 (B-0011): A run that times out during its model call leaves steps
-  pending; compact → 409 `thread_run_unfinished` with the state unchanged; after the
-  next message completes, compact succeeds and the following run's system prompt
-  holds the summary. -> `tests/test_threads.py::test_compact_unfinished_run`
+  pending; GET → status unfinished with no pending_action; compact → 409
+  `thread_run_unfinished` with the state unchanged; after the next message
+  completes, GET → status idle, compact succeeds and the following run's system
+  prompt holds the summary. -> `tests/test_threads.py::test_compact_unfinished_run`
 - AT-0011 (B-0010): The OpenAPI schema lists the three operations with the
   documented responses. -> `tests/test_api_docs.py::test_operations_documented`
 
