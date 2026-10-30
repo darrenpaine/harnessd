@@ -69,6 +69,7 @@ async def run(args: argparse.Namespace) -> int:
     from evals.dataset import EvalDatabaseError, load_cases, select
     from evals.records import model_key, write_run
     from evals.report import (
+        BaselineRefusedError,
         accept_baseline,
         gate,
         load_baselines,
@@ -86,12 +87,16 @@ async def run(args: argparse.Namespace) -> int:
     if args.accept_baseline:
         settings = get_settings()
         model = f"{settings.llm_provider} {settings.llm_model}"
-        baseline = accept_baseline(
-            load_runs(evals / "runs"),
-            settings.llm_provider,
-            settings.llm_model,
-            evals / "baselines",
-        )
+        try:
+            baseline = accept_baseline(
+                load_runs(evals / "runs"),
+                settings.llm_provider,
+                settings.llm_model,
+                evals / "baselines",
+            )
+        except BaselineRefusedError as exc:
+            print(exc, file=sys.stderr)
+            return 2
         if baseline is None:
             print(f"no full run of {model} to accept", file=sys.stderr)
             return 2

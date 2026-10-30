@@ -12,6 +12,15 @@ from evals.records import RunRecord, model_key
 MAX_VALUE = 80  # characters of an expected or actual value shown in the report
 
 
+class BaselineRefusedError(Exception):
+    """The run can't be a baseline because a must_pass case failed (B-0004)."""
+
+    def __init__(self, run_id: str, failures: Sequence[str]) -> None:
+        super().__init__(
+            f"{run_id} has must_pass failures: {', '.join(failures)}; not accepted"
+        )
+
+
 class Baseline(BaseModel):
     """The full run accepted as a model's baseline."""
 
@@ -39,12 +48,16 @@ def load_baselines(directory: Path) -> dict[str, Baseline]:
 def accept_baseline(
     runs: Sequence[RunRecord], provider: str, model: str, directory: Path
 ) -> Baseline | None:
-    """Write the model's latest full run as its baseline; None if it has none."""
+    """Write the model's latest full run as its baseline; None if it has none.
+    Raises BaselineRefusedError if that run has a must_pass failure (B-0004)."""
     key = model_key(provider, model)
     full = [r for r in runs if not r.partial and model_key(r.provider, r.model) == key]
     if not full:
         return None
-    baseline = Baseline(run_id=full[-1].run_id, score=full[-1].totals.score)
+    latest = full[-1]
+    if latest.totals.must_pass_failures:
+        raise BaselineRefusedError(latest.run_id, latest.totals.must_pass_failures)
+    baseline = Baseline(run_id=latest.run_id, score=latest.totals.score)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{key}.json").write_text(
         baseline.model_dump_json(indent=2) + "\n", encoding="utf-8"

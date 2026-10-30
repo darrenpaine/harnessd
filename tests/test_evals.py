@@ -30,6 +30,7 @@ from evals.records import (
 )
 from evals.report import (
     Baseline,
+    BaselineRefusedError,
     accept_baseline,
     gate,
     load_baselines,
@@ -481,6 +482,7 @@ def test_regression_gate() -> None:
     assert gate(run_record(0.84), baseline, 5) != []
     assert gate(run_record(0.85), baseline, 5) == []  # exactly 5 points is allowed
     assert gate(run_record(0.95), None, 5) == []
+    # No baseline skips the score check, but must_pass failures still fail.
     assert gate(run_record(1.0, must_pass_failures=("EV-0003",)), None, 5) == [
         "must_pass case failed: EV-0003"
     ]
@@ -493,7 +495,7 @@ def test_regression_gate() -> None:
     )
 
 
-@pytest.mark.spec("SPEC-0011", "B-0004")
+@pytest.mark.spec("SPEC-0011", "B-0004", "AT-0005")
 def test_accept_baseline(tmp_path: Path) -> None:
     runs = [
         run_record(0.7, hour=8),
@@ -509,6 +511,15 @@ def test_accept_baseline(tmp_path: Path) -> None:
     assert accept_baseline(runs, "ollama", "gemma4:12b", tmp_path) is None
     assert accept_baseline(runs, "ollama", "qwen3:8b", tmp_path) is not None
     assert (tmp_path / "ollama__qwen3-8b.json").exists()
+
+    # A run with a must_pass failure is refused, with no fallback to an earlier run.
+    unsafe = [*runs, run_record(0.9, hour=12, must_pass_failures=("EV-0003",))]
+    with pytest.raises(BaselineRefusedError, match="EV-0003"):
+        accept_baseline(unsafe, "ollama", "llama3.1", tmp_path)
+    assert load_baselines(tmp_path)["ollama__llama3.1"] == baseline
+    with pytest.raises(BaselineRefusedError):
+        accept_baseline(unsafe, "ollama", "llama3.1", tmp_path / "fresh")
+    assert not (tmp_path / "fresh").exists()
 
 
 @pytest.mark.spec("SPEC-0011", "B-0005", "AT-0006")
