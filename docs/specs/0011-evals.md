@@ -31,7 +31,9 @@ is caught before it is merged.
   `make evals` against the configured provider. Each run is recorded in the repo
   and the report shows the history, so a regression is visible in review.
 - **Baseline + must-pass cases.** A committed baseline per model; a run fails if
-  it drops too far below it, or if any must-pass case fails.
+  it drops too far below it, or if any must-pass case fails. Must-pass failures
+  fail a run even before the model has a baseline, and a run with them can't
+  become one.
 
 ### Alternatives considered
 | Option | Why not chosen |
@@ -135,7 +137,8 @@ Checks on several turns of one thread:
   compare it with the baseline, regenerate `REPORT.md`; exit 1 on a regression.
 - `make evals ARGS="--tag confirmation --repeats 1"` — a subset; subset runs are
   written but marked `partial` and never compared or used as a baseline.
-- `make evals-baseline` — accept the latest full run as the model's baseline.
+- `make evals-baseline` — accept the latest full run as the model's baseline;
+  refused (exit 2) if that run has a must_pass failure.
 
 Runs need Redis (`make redis`), as the redis tests do.
 
@@ -158,9 +161,11 @@ provider's existing settings (keys, `OLLAMA_BASE_URL`).
   confirmations still apply.
 - B-0003: Scoring follows the rules above; failures name the check and the actual
   value.
-- B-0004: A full run fails (exit 1) when its score is more than
-  `EVAL_REGRESSION_POINTS` below the model's baseline, or when any must_pass case
-  fails. With no baseline it reports and exits 0.
+- B-0004: A full run fails (exit 1) when any must_pass case fails, or when its
+  score is more than `EVAL_REGRESSION_POINTS` below the model's baseline. With no
+  baseline, the score check is skipped and reported; must_pass failures still
+  fail the run. `make evals-baseline` refuses (exit 2) a run with a must_pass
+  failure, so a baseline always passes every must_pass case.
 - B-0005: Each full or partial run writes one run file; `REPORT.md` is regenerated
   from all run files: per model, the latest score vs baseline, a history table, and
   the failing cases with their failed checks.
@@ -186,7 +191,10 @@ Unit tests use the scripted fake model; none call a real LLM.
   a must_pass case with the same results fails.
   -> `tests/test_evals.py::test_repeat_scoring`
 - AT-0005 (B-0004): Score 6 points below baseline → exit 1; a must_pass failure →
-  exit 1; no baseline → exit 0. -> `tests/test_evals.py::test_regression_gate`
+  exit 1; no baseline → exit 0; no baseline and a must_pass failure → exit 1.
+  Accepting a baseline from a run with a must_pass failure → refused, no baseline
+  written. -> `tests/test_evals.py::test_regression_gate`,
+  `tests/test_evals.py::test_accept_baseline`
 - AT-0006 (B-0005): Two run files → REPORT.md shows both in history and the latest
   failures. -> `tests/test_evals.py::test_report`
 - AT-0007 (B-0006): A fake judge returning typed answers → the judge score counts

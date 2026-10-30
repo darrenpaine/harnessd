@@ -2,8 +2,11 @@
 
     make evals                                   every case, EVAL_REPEATS times
     make evals ARGS="--tag confirmation --repeats 1"   a partial run
+    make evals-baseline                          accept the latest full run
+    make evals-report                            only regenerate REPORT.md
 
-Writes one run file to evals/runs/. Needs Redis (`make redis`).
+Writes one run file to evals/runs/, regenerates evals/REPORT.md and exits 1 if
+a full run regresses. Needs Redis (`make redis`).
 """
 
 import argparse
@@ -14,8 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-CASES = Path("evals") / "cases"
-RUNS = Path("evals") / "runs"
+EVALS = Path("evals")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -27,8 +29,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--repeats", type=int, help="repeats per case (default EVAL_REPEATS)"
     )
-    parser.add_argument("--cases", type=Path, default=CASES, help="dataset directory")
-    parser.add_argument("--runs", type=Path, default=RUNS, help="run file directory")
+    parser.add_argument(
+        "--evals",
+        type=Path,
+        default=EVALS,
+        help="directory with cases/, runs/, baselines/ and REPORT.md",
+    )
+    parser.add_argument(
+        "--accept-baseline",
+        action="store_true",
+        help="make the configured model's latest full run its baseline, and exit",
+    )
+    parser.add_argument(
+        "--report", action="store_true", help="only regenerate REPORT.md, and exit"
+    )
     return parser.parse_args(argv)
 
 
@@ -53,14 +67,46 @@ async def run(args: argparse.Namespace) -> int:
     from agent.llm import build_chat_model
     from agent.persistence import REDIS_ERRORS, RedisThreadGuard, open_checkpointer
     from evals.dataset import EvalDatabaseError, load_cases, select
-    from evals.records import write_run
+    from evals.records import model_key, write_run
+    from evals.report import (
+        BaselineRefusedError,
+        accept_baseline,
+        gate,
+        load_baselines,
+        load_runs,
+        write_report,
+    )
     from evals.runner import CaseRunner, run_cases
     from logs import configure_logging
     from settings import get_settings
 
+    evals = ROOT / args.evals
+    if args.report:
+        print(f"wrote {write_report(evals)}")
+        return 0
+    if args.accept_baseline:
+        settings = get_settings()
+        model = f"{settings.llm_provider} {settings.llm_model}"
+        try:
+            baseline = accept_baseline(
+                load_runs(evals / "runs"),
+                settings.llm_provider,
+                settings.llm_model,
+                evals / "baselines",
+            )
+        except BaselineRefusedError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        if baseline is None:
+            print(f"no full run of {model} to accept", file=sys.stderr)
+            return 2
+        write_report(evals)
+        print(f"baseline for {model}: {baseline.run_id} ({baseline.score:.3f})")
+        return 0
+
     # B-0001: an invalid dataset stops the run before any model call.
     try:
-        cases = load_cases(ROOT / args.cases)
+        cases = load_cases(evals / "cases")
     except EvalDatabaseError as exc:
         print("invalid eval dataset:", *exc.problems, sep="\n  ", file=sys.stderr)
         return 2
@@ -108,13 +154,24 @@ async def run(args: argparse.Namespace) -> int:
     finally:
         await redis.aclose()
 
-    path = write_run(record, ROOT / args.runs)
+    path = write_run(record, evals / "runs")
+    write_report(evals)
     total = record.totals
     print(f"score {total.score:.3f}" + (" (partial)" if partial else ""))
     if total.must_pass_failures:
         print("must-pass failures:", ", ".join(total.must_pass_failures))
     print(f"wrote {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
-    return 0
+
+    # B-0004: a full run fails on a must_pass failure or a drop below baseline.
+    baseline = load_baselines(evals / "baselines").get(
+        model_key(record.provider, record.model)
+    )
+    if baseline is None and not partial:
+        print("no baseline yet; `make evals-baseline` accepts this run")
+    reasons = gate(record, baseline, settings.eval_regression_points)
+    for reason in reasons:
+        print("regression:", reason, file=sys.stderr)
+    return 1 if reasons else 0
 
 
 def main() -> None:

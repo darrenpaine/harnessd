@@ -5,6 +5,7 @@ No test calls a real model: cases run on the scripted fake (SPEC-0005).
 
 import json
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,26 @@ from redis.asyncio import Redis
 from agent.persistence import RedisThreadGuard, open_checkpointer
 from agent_support import LocalThreadGuard, fetch, note, tool_turn
 from evals.dataset import EvalDatabaseError, load_cases, select
-from evals.records import Attempt, RunRecord, TurnResult, write_run
+from evals.records import (
+    Attempt,
+    CaseFailure,
+    CaseResult,
+    RunRecord,
+    RunTotals,
+    TurnResult,
+    run_id,
+    write_run,
+)
+from evals.report import (
+    Baseline,
+    BaselineRefusedError,
+    accept_baseline,
+    gate,
+    load_baselines,
+    load_runs,
+    render_report,
+    report_for,
+)
 from evals.runner import CaseRunner, run_cases
 from evals.scoring import case_score, check_turn, score_case
 from fakes import ScriptedChatModel
@@ -38,6 +58,7 @@ from schemas import (
 from settings import Settings
 from tools.base import ToolContext
 
+ROOT = Path(__file__).resolve().parent.parent
 THREAD = "6f1c2a9e-4b7d-4e2a-9c1f-3d5e8a7b2c15"
 SEARCH = ("web_search", {"query": "harness agents"})
 
@@ -421,3 +442,148 @@ async def test_cases_run_on_redis(
     responses = [t.response for t in attempt.turns]
     thread_id = str(responses[0].thread_id if responses[0] else "")
     assert [k async for k in redis.scan_iter(match=f"*{thread_id}*")] == []
+
+
+def run_record(
+    score: float,
+    *,
+    hour: int = 9,
+    partial: bool = False,
+    model: str = "llama3.1",
+    must_pass_failures: tuple[str, ...] = (),
+    cases: tuple[CaseResult, ...] = (),
+) -> RunRecord:
+    started_at = datetime(2026, 10, 23, hour, tzinfo=UTC)
+    return RunRecord(
+        run_id=run_id(started_at, "ollama", model),
+        started_at=started_at,
+        git_sha="abc1234def",
+        dirty=False,
+        provider="ollama",
+        model=model,
+        repeats=3,
+        partial=partial,
+        cases=list(cases),
+        totals=RunTotals(
+            score=score,
+            by_tag={},
+            must_pass_failures=list(must_pass_failures),
+            latency_p50_ms=900,
+            latency_p95_ms=2100,
+            tokens=None,
+        ),
+    )
+
+
+@pytest.mark.spec("SPEC-0011", "B-0004", "AT-0005")
+def test_regression_gate() -> None:
+    baseline = Baseline(run_id="base", score=0.9)
+
+    assert gate(run_record(0.84), baseline, 5) != []
+    assert gate(run_record(0.85), baseline, 5) == []  # exactly 5 points is allowed
+    assert gate(run_record(0.95), None, 5) == []
+    # No baseline skips the score check, but must_pass failures still fail.
+    assert gate(run_record(1.0, must_pass_failures=("EV-0003",)), None, 5) == [
+        "must_pass case failed: EV-0003"
+    ]
+    # Partial runs are never compared, so they never fail the gate.
+    assert (
+        gate(
+            run_record(0.1, partial=True, must_pass_failures=("EV-0003",)), baseline, 5
+        )
+        == []
+    )
+
+
+@pytest.mark.spec("SPEC-0011", "B-0004", "AT-0005")
+def test_accept_baseline(tmp_path: Path) -> None:
+    runs = [
+        run_record(0.7, hour=8),
+        run_record(0.8, hour=9),
+        run_record(0.2, hour=10, partial=True),
+        run_record(0.5, hour=11, model="qwen3:8b"),
+    ]
+
+    baseline = accept_baseline(runs, "ollama", "llama3.1", tmp_path)
+
+    assert baseline == Baseline(run_id=runs[1].run_id, score=0.8)
+    assert load_baselines(tmp_path) == {"ollama__llama3.1": baseline}
+    assert accept_baseline(runs, "ollama", "gemma4:12b", tmp_path) is None
+    assert accept_baseline(runs, "ollama", "qwen3:8b", tmp_path) is not None
+    assert (tmp_path / "ollama__qwen3-8b.json").exists()
+
+    # A run with a must_pass failure is refused, with no fallback to an earlier run.
+    unsafe = [*runs, run_record(0.9, hour=12, must_pass_failures=("EV-0003",))]
+    with pytest.raises(BaselineRefusedError, match="EV-0003"):
+        accept_baseline(unsafe, "ollama", "llama3.1", tmp_path)
+    assert load_baselines(tmp_path)["ollama__llama3.1"] == baseline
+    with pytest.raises(BaselineRefusedError):
+        accept_baseline(unsafe, "ollama", "llama3.1", tmp_path / "fresh")
+    assert not (tmp_path / "fresh").exists()
+
+
+@pytest.mark.spec("SPEC-0011", "B-0005", "AT-0006")
+def test_report(tmp_path: Path) -> None:
+    failing = CaseResult(
+        id="EV-0003",
+        score=0.0,
+        passed=False,
+        must_pass=True,
+        failures=[
+            CaseFailure(
+                repeat=0,
+                turn=0,
+                check="status",
+                expected="awaiting_confirmation",
+                actual="ok",
+            ),
+            CaseFailure(
+                repeat=1,
+                turn=0,
+                check="answer_contains",
+                expected=["a|b"],
+                actual="x" * 200,
+            ),
+        ],
+        tool_calls=1,
+        latency_ms=1000,
+    )
+    older = run_record(0.9, hour=8)
+    latest = run_record(0.6, hour=9, must_pass_failures=("EV-0003",), cases=(failing,))
+    write_run(latest, tmp_path / "runs")
+    write_run(older, tmp_path / "runs")
+    (tmp_path / "baselines").mkdir()
+    (tmp_path / "baselines" / "ollama__llama3.1.json").write_text(
+        Baseline(run_id=older.run_id, score=0.9).model_dump_json()
+    )
+
+    assert load_runs(tmp_path / "runs") == [older, latest]
+    report = report_for(tmp_path)
+
+    assert "## ollama llama3.1" in report
+    assert f"Latest full score: 0.600; baseline 0.900 (`{older.run_id}`)." in report
+    history = [row for row in report.splitlines() if row.startswith("| `")]
+    assert [row.split(" | ")[0] for row in history] == [
+        f"| `{latest.run_id}`",
+        f"| `{older.run_id}`",
+    ]
+    assert "| abc1234 | full | 1 | 3 | 0.600 | EV-0003 | 900 | 2100 | - |" in report
+    assert f"### Failing cases in `{latest.run_id}`" in report
+    assert "- **EV-0003** (score 0.00, must_pass)" in report
+    assert (
+        '  - repeat 0, turn 0, `status`: expected `"awaiting_confirmation"`, got `"ok"`'
+        in report
+    )
+    assert "x" * 79 not in report and "…`" in report
+    assert render_report([], {}).endswith("No runs yet.\n")
+
+
+@pytest.mark.spec("SPEC-0011", "B-0001", "B-0008", "AT-0008")
+def test_committed_evals_consistent() -> None:
+    """The committed dataset validates and REPORT.md matches the run files;
+    after a run, commit the run file with the regenerated report."""
+    evals = ROOT / "evals"
+    load_cases(evals / "cases")
+    assert (evals / "REPORT.md").read_text(encoding="utf-8") == report_for(evals), (
+        "evals/REPORT.md is out of date; run `make evals-report`"
+    )

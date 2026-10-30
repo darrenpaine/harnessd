@@ -35,6 +35,10 @@ trace:
 	uv run python scripts/trace.py
 evals:  # needs Redis; ARGS="--tag confirmation --repeats 1" for a partial run (SPEC-0011)
 	uv run python scripts/run_evals.py $(ARGS)
+evals-baseline:  # accept the configured model's latest full run as its baseline
+	uv run python scripts/run_evals.py --accept-baseline
+evals-report:  # regenerate evals/REPORT.md from the run files, without a model
+	uv run python scripts/run_evals.py --report
 
 ## Git checks
 pre-commit:
