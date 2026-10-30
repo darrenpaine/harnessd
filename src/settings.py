@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
+    llm_requests_per_minute: int | None = Field(default=None, ge=1)  # B-0008
 
     # Tools
     tavily_api_key: SecretStr | None = None
