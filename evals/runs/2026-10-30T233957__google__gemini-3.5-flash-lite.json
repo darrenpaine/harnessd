@@ -1,0 +1,35 @@
+{
+  "run_id": "2026-10-30T233957__google__gemini-3.5-flash-lite",
+  "started_at": "2026-10-30T23:39:57.707309Z",
+  "git_sha": "276f60299b9b64fda1b533c71545dd9edb4ea2db",
+  "dirty": true,
+  "provider": "google",
+  "model": "gemini-3.5-flash-lite",
+  "judge_model": null,
+  "repeats": 3,
+  "partial": true,
+  "cases": [
+    {
+      "id": "EV-0011",
+      "score": 1.0,
+      "passed": true,
+      "must_pass": true,
+      "failures": [],
+      "judge_score": null,
+      "tool_calls": 3.0,
+      "latency_ms": 24292,
+      "input_tokens": 6123,
+      "output_tokens": 299
+    }
+  ],
+  "totals": {
+    "score": 1.0,
+    "by_tag": {
+      "confirmation": 1.0
+    },
+    "must_pass_failures": [],
+    "latency_p50_ms": 4027,
+    "latency_p95_ms": 4651,
+    "tokens": 6422
+  }
+}

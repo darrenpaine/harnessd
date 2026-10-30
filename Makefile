@@ -1,3 +1,5 @@
+.PHONY: up redis langfuse down build logs run lint fix format pytest coverage mypy openapi trace evals evals-baseline evals-report pre-commit pre-commit-setup
+
 # Helper to run commands with make
 
 ## Running in Docker
