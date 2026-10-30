@@ -419,6 +419,7 @@ async def test_compact_unfinished_run(
     assert timed_out.json()["status"] == "error"
     agent.model.delay = 0
     before = (await client.get(thread(thread_id))).json()
+    assert before["status"] == "unfinished" and before["pending_action"] is None
     compact = thread(thread_id, "/compact")
 
     refused = await client.post(compact, json={"keep_turns": 1})
@@ -428,6 +429,7 @@ async def test_compact_unfinished_run(
     assert (await client.get(thread(thread_id))).json() == before
 
     await run(client, "again", thread_id)
+    assert (await client.get(thread(thread_id))).json()["status"] == "idle"
     done = await client.post(compact, json={"keep_turns": 1})
     assert done.status_code == 200 and done.json()["compacted"] is True
     await run(client, "after", thread_id)

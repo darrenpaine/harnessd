@@ -30,7 +30,6 @@ from schemas import (
     CompactResponse,
     ThreadMessage,
     ThreadState,
-    ThreadStatus,
     ThreadToolCall,
 )
 from settings import Settings
@@ -72,14 +71,9 @@ class ThreadService:
         """B-0001: the latest state, without the lock or a TTL reset."""
         with log_context(thread=str(thread_id)), thread_span("thread.read", thread_id):
             state = await self._state(thread_id)
-            # SPEC-0009 has no unfinished status yet, so an unfinished run reads
-            # as idle.
-            status: ThreadStatus = (
-                "awaiting_confirmation" if state.pending_action else "idle"
-            )
             thread = ThreadState(
                 thread_id=thread_id,
-                status=status,
+                status=state.status,
                 pending_action=state.pending_action,
                 summary=state.summary,
                 messages=[thread_message(m) for m in state.messages],

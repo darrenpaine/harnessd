@@ -624,10 +624,11 @@
             "description": "The action waiting for confirmation; set only when status is awaiting_confirmation."
           },
           "status": {
-            "description": "Whether an action awaits confirmation.",
+            "description": "idle: ready for a message; awaiting_confirmation: paused on a pending action; unfinished: the last run stopped part way (B-0011).",
             "enum": [
               "idle",
-              "awaiting_confirmation"
+              "awaiting_confirmation",
+              "unfinished"
             ],
             "title": "Status",
             "type": "string"

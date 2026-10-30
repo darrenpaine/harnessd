@@ -55,4 +55,4 @@ _Avoid_: digest, recap
 
 - "Turn" means a user message and what follows it (SPEC-0009), while SPEC-0001 says "model turn" for one model reply. Resolved: **Turn** is the SPEC-0009 meaning; always say **Model turn** for one model reply.
 - "Truncated" is a run status (the tool-call cap was reached) and must not be used for compaction. Resolved: **Compaction** is the only word for shortening history.
-- "Idle": the API reports a thread with an unfinished run as idle (SPEC-0009 has no unfinished status yet). In this glossary **Thread status** distinguishes them; the API change is pending.
+- "Idle" once also covered a thread with an unfinished run. Resolved: **Thread status** has three values, and SPEC-0009 reports unfinished separately.
