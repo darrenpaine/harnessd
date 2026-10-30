@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import AIMessage
 
-from agent.runner import ConfirmationStateError
+from agent.agent_threads import ConfirmationStateError
 from agent_support import Agent, fetch, note, tool_turn
 from schemas import AddNoteCall
 from tools.base import ToolContext

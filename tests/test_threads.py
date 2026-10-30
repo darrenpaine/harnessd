@@ -16,7 +16,6 @@ from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from redis.asyncio import Redis
 
-from agent.graph import thread_config
 from agent.persistence import (
     RedisThreadGuard,
     checkpoint_keys,
@@ -188,7 +187,7 @@ async def test_delete_unloadable_thread(
     async with open_checkpointer(redis_settings) as saver:
         client, _ = make_client(replies("hi"), checkpointer=saver, guard=guard)
         thread_id = await run(client, "hello")
-        latest = await saver.aget_tuple(thread_config(uuid.UUID(thread_id)))
+        latest = await saver.aget_tuple({"configurable": {"thread_id": thread_id}})
         assert latest is not None
         # Two values for one channel in one step can't be applied.
         clash = [("max_tool_calls", 1), ("max_tool_calls", 2)]

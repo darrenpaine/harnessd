@@ -4,7 +4,6 @@ import logging
 import time
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
-from uuid import UUID
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -16,7 +15,6 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.messages.tool import ToolCall
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
@@ -49,7 +47,7 @@ class Outcome(TypedDict):
 
 
 class RunCounters(TypedDict):
-    """The state reset at the start of every request; see `run_counters`."""
+    """The state reset at the start of every request (AgentThreads)."""
 
     max_tool_calls: int
     calls_used: int
@@ -71,18 +69,6 @@ class AgentState(RunInput):
 
 
 AgentGraph = CompiledStateGraph[AgentState, None, RunInput]
-
-
-def thread_config(thread_id: UUID) -> RunnableConfig:
-    """The config that selects a thread's checkpoint; runs and the thread
-    endpoints both use it, so they always read the same state."""
-    return {"configurable": {"thread_id": str(thread_id)}}
-
-
-def run_counters(max_tool_calls: int) -> RunCounters:
-    return RunCounters(
-        max_tool_calls=max_tool_calls, calls_used=0, trace=[], outcome=None
-    )
 
 
 Tools = Mapping[str, Tool[Any, Any]]

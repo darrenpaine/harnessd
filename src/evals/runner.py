@@ -16,6 +16,7 @@ from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from agent.agent_threads import AgentThreads
 from agent.graph import build_graph
 from agent.persistence import ThreadGuard
 from agent.runner import AgentRunner
@@ -63,7 +64,7 @@ class CaseRunner:
                 if result.response is None:
                     break
         finally:
-            await self.checkpointer.adelete_thread(str(thread_id))
+            await AgentThreads(graph).delete(thread_id)
         return attempt
 
 

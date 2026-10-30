@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from agent.graph import (
     AgentState,
     build_prompt,
-    run_counters,
     tool_schema,
 )
 from agent.persistence import ThreadBusyError
@@ -176,7 +175,10 @@ def test_build_prompt() -> None:
         queue=[],
         invalid_turns=0,
         summary=None,
-        **run_counters(5),
+        max_tool_calls=5,
+        calls_used=0,
+        trace=[],
+        outcome=None,
     )
 
     system, *history = build_prompt(state)

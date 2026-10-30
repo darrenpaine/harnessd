@@ -16,22 +16,21 @@ from langchain_core.messages import (
     AIMessage,
     BaseMessage,
     HumanMessage,
-    RemoveMessage,
     SystemMessage,
     ToolMessage,
 )
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.types import StateSnapshot
 
-from agent.graph import AgentGraph, thread_config
+from agent.agent_threads import AgentThreads
+from agent.graph import AgentGraph
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, log_context
 from prompts import SUMMARY_PROMPT
 from schemas import (
+    AgentThreadState,
     CompactResponse,
-    PendingAction,
     ThreadMessage,
     ThreadState,
+    ThreadStatus,
     ThreadToolCall,
 )
 from settings import Settings
@@ -64,7 +63,7 @@ class ThreadService:
         settings: Settings,
         guard: ThreadGuard,
     ) -> None:
-        self.graph = graph
+        self.threads = AgentThreads(graph)
         self.model = model
         self.settings = settings
         self.guard = guard
@@ -72,35 +71,33 @@ class ThreadService:
     async def read(self, thread_id: UUID) -> ThreadState:
         """B-0001: the latest state, without the lock or a TTL reset."""
         with log_context(thread=str(thread_id)), thread_span("thread.read", thread_id):
-            snapshot = await self._snapshot(thread_id)
-            pending = snapshot.interrupts
-            state = ThreadState(
+            state = await self._state(thread_id)
+            # SPEC-0009 has no unfinished status yet, so an unfinished run reads
+            # as idle.
+            status: ThreadStatus = (
+                "awaiting_confirmation" if state.pending_action else "idle"
+            )
+            thread = ThreadState(
                 thread_id=thread_id,
-                status="awaiting_confirmation" if pending else "idle",
-                pending_action=(
-                    PendingAction.model_validate(pending[0].value) if pending else None
-                ),
-                summary=snapshot.values.get("summary"),
-                messages=[thread_message(m) for m in snapshot.values["messages"]],
+                status=status,
+                pending_action=state.pending_action,
+                summary=state.summary,
+                messages=[thread_message(m) for m in state.messages],
                 expires_in_seconds=await self.guard.expires_in(str(thread_id)),
             )
             event(log, logging.INFO, "thread.read")
-            return state
+            return thread
 
     async def delete(self, thread_id: UUID) -> None:
-        """B-0002: remove every checkpoint of the thread, under its lock. It
-        checks for a checkpoint without loading the state, so a thread whose
-        state can't be loaded can still be deleted."""
+        """B-0002: remove every checkpoint of the thread, under its lock. A
+        thread whose state can't be loaded can still be deleted."""
         with (
             log_context(thread=str(thread_id)),
             thread_span("thread.delete", thread_id),
         ):
             async with self.guard.hold(str(thread_id)):
-                saver = self.graph.checkpointer
-                assert isinstance(saver, BaseCheckpointSaver)
-                if await saver.aget_tuple(thread_config(thread_id)) is None:
+                if not await self.threads.delete(thread_id):
                     raise ThreadNotFoundError(str(thread_id))
-                await saver.adelete_thread(str(thread_id))
             event(log, logging.INFO, "thread.deleted")
 
     async def compact(self, thread_id: UUID, keep_turns: int) -> CompactResponse:
@@ -116,21 +113,16 @@ class ThreadService:
         ):
             started = time.perf_counter()
             async with self.guard.hold(str(thread_id)):
-                snapshot = await self._snapshot(thread_id)
-                if snapshot.interrupts:
+                state = await self._state(thread_id)
+                if state.status == "awaiting_confirmation":
                     raise ThreadAwaitingConfirmationError(str(thread_id))
-                if snapshot.next:
+                if state.status == "unfinished":
                     raise ThreadRunUnfinishedError(str(thread_id))
-                messages: list[BaseMessage] = snapshot.values["messages"]
-                summary: str | None = snapshot.values.get("summary")
-                removed = messages[: compaction_cut(messages, keep_turns)]
+                summary = state.summary
+                removed = state.messages[: compaction_cut(state.messages, keep_turns)]
                 if removed:
                     summary = await self._summarise(summary, removed)
-                    update = {
-                        "messages": [RemoveMessage(id=m.id or "") for m in removed],
-                        "summary": summary,
-                    }
-                    await self.graph.aupdate_state(thread_config(thread_id), update)
+                    await self.threads.replace_history(thread_id, removed, summary)
                     await self.guard.touch(str(thread_id))
             event(
                 log,
@@ -147,11 +139,11 @@ class ThreadService:
                 summary=summary,
             )
 
-    async def _snapshot(self, thread_id: UUID) -> StateSnapshot:
-        snapshot = await self.graph.aget_state(thread_config(thread_id))
-        if not snapshot.values:
+    async def _state(self, thread_id: UUID) -> AgentThreadState:
+        state = await self.threads.state(thread_id)
+        if state is None:
             raise ThreadNotFoundError(str(thread_id))
-        return snapshot
+        return state
 
     async def _summarise(
         self, previous: str | None, messages: Sequence[BaseMessage]

@@ -5,7 +5,8 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends
 from fastapi.exceptions import RequestValidationError
 
-from agent.runner import AgentRunner, ConfirmationStateError
+from agent.agent_threads import ConfirmationStateError
+from agent.runner import AgentRunner
 from api.deps import get_runner
 from api.errors import BUSY, UNAVAILABLE, UNEXPECTED, error_responses
 from schemas import REQUEST_EXAMPLES, AgentRequest, AgentResponse
