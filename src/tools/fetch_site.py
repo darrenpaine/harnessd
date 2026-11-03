@@ -16,26 +16,53 @@ TEXT_TYPES = HTML_TYPES | {"text/plain"}
 
 
 class _TextExtractor(HTMLParser):
-    """Collects text a reader would see, skipping scripts, styles and the like."""
+    """Collects text a reader would see, skipping scripts, styles and the like,
+    and elements hidden by attribute or inline style (SPEC-0012 B-0016).
+    Comments are never collected."""
 
     HIDDEN = {"script", "style", "noscript", "template", "svg"}
+    VOID = {
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "source", "track", "wbr",
+    }  # fmt: skip
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
+        # The hidden element's tag, and how many of that tag are open inside it,
+        # so other tags left unclosed don't keep the rest of the page hidden.
+        self._hidden_tag: str | None = None
         self._hidden_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self.HIDDEN:
-            self._hidden_depth += 1
+        if self._hidden_tag is not None:
+            if tag == self._hidden_tag:
+                self._hidden_depth += 1
+        elif tag not in self.VOID and (tag in self.HIDDEN or _hidden(attrs)):
+            self._hidden_tag, self._hidden_depth = tag, 1
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self.HIDDEN and self._hidden_depth:
+        if tag == self._hidden_tag:
             self._hidden_depth -= 1
+            if not self._hidden_depth:
+                self._hidden_tag = None
 
     def handle_data(self, data: str) -> None:
-        if not self._hidden_depth:
+        if self._hidden_tag is None:
             self.parts.append(data)
+
+
+def _hidden(attrs: list[tuple[str, str | None]]) -> bool:
+    """The `hidden` attribute, `aria-hidden="true"`, or an inline style with
+    `display: none` or `visibility: hidden`."""
+    values = {name.lower(): (value or "").lower() for name, value in attrs}
+    style = "".join(values.get("style", "").split())
+    return (
+        "hidden" in values
+        or values.get("aria-hidden") == "true"
+        or "display:none" in style
+        or "visibility:hidden" in style
+    )
 
 
 def visible_text(html: str) -> str:
