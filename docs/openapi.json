@@ -868,6 +868,7 @@
         "additionalProperties": false,
         "properties": {
           "snippet": {
+            "maxLength": 500,
             "title": "Snippet",
             "type": "string"
           },
