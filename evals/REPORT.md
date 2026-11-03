@@ -10,9 +10,10 @@ Latest full score: 1.000; baseline 1.000 (`2026-11-02T164642__google__gemini-3.5
 
 | Run | Commit | Kind | Cases | Repeats | Score | Must-pass failures | p50 ms | p95 ms | Tokens |
 |---|---|---|---|---|---|---|---|---|---|
+| `2026-11-03T100148__google__gemini-3.5-flash-lite` | fa314e3 (dirty) | full | 20 | 3 | 1.000 | - | 7962 | 39221 | 54460 |
 | `2026-11-02T164642__google__gemini-3.5-flash-lite` | 4535ea5 (dirty) | full | 15 | 3 | 1.000 | - | 4183 | 12153 | 37360 |
 | `2026-10-30T233957__google__gemini-3.5-flash-lite` | 276f602 (dirty) | partial | 1 | 3 | 1.000 | - | 4027 | 4651 | 6422 |
 
-### Failing cases in `2026-11-02T164642__google__gemini-3.5-flash-lite`
+### Failing cases in `2026-11-03T100148__google__gemini-3.5-flash-lite`
 
 None.
