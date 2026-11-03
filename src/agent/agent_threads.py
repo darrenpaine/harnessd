@@ -26,6 +26,7 @@ from schemas import (
     PendingAction,
     ToolCallRecord,
 )
+from tools.sanitize import strip_invisible
 
 _TRACE: TypeAdapter[list[ToolCallRecord]] = TypeAdapter(list[ToolCallRecord])
 
@@ -87,8 +88,11 @@ class AgentThreads:
             raise ConfirmationStateError(
                 "the thread is awaiting confirmation; send confirm instead"
             )
+        # Only invisible characters are removed; the message is never blocked
+        # (SPEC-0012 B-0007, B-0015).
+        text, _ = strip_invisible(message)
         graph_input = RunInput(
-            messages=[HumanMessage(content=message)],
+            messages=[HumanMessage(content=text)],
             queue=[],
             invalid_turns=0,
             **_counters(max_tool_calls),
