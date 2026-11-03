@@ -13,9 +13,17 @@ the agent did and who approved it.
 ## Decisions
 - **Layered injection defence, plus an optional decision-model screen.** No single
   control stops prompt injection, so several cheap layers each cut the risk: tool
-  output is marked as untrusted data, sizes are capped, side effects need a human,
-  and a System One decision model (the same plumbing as the SPEC-0011 judge) can
+  output is marked as untrusted data, sizes are capped, text a reader can't see
+  is removed, side effects need a human, and an optional decision-model screen can
   withhold tool output that looks like an injection. Eval cases measure it.
+- **Remove what a reader can't see.** Invisible Unicode (zero-width, bidi
+  controls, tag characters, variation selectors) and hidden HTML can carry
+  instructions a person reviewing the page or message would never notice. They are
+  stripped from tool output and from user messages; visible text is unchanged.
+- **System One screen on the app's Ollama.** The screen asks Bespoke Labs'
+  `nimble` through Ollama's `/v1/systemone` endpoint, which already runs beside the
+  app, for the probability that text contains instructions aimed at an AI agent.
+  A chat model can do the same job where no decision model is available.
 - **Budgets at three levels.** Per run (a runaway loop), per thread (one long
   conversation) and per day (total spend), so no single failure mode is
   unbounded.
@@ -30,7 +38,8 @@ the agent did and who approved it.
 | Option | Why not chosen |
 |--------|----------------|
 | NeMo Guardrails / Guardrails AI | Broad rail and validator libraries, but heavy dependencies and a second control flow around the LangGraph loop. |
-| Llama Guard / Prompt Guard | Purpose-built classifiers, but another model to host; Prompt Guard needs a transformers runtime rather than Ollama. A decision model on Ollama reuses what evals already need. |
+| Llama Guard / Prompt Guard | Purpose-built classifiers, but another model to host; Prompt Guard needs a transformers runtime rather than Ollama. A decision model on the app's Ollama needs nothing new. |
+| TypeSafe AI's hosted `Jev` decision model as the screen | Same API shape as System One, hosted. Deferred: early access, needs an API key, and sends fetched content to a third party. |
 | Layers without a screen | Fully deterministic, but nothing catches an injection that changes the answer rather than calling add_note. The screen is optional, so this remains the default when it is off. |
 | Audit in a Redis Stream or file | Queryable, but new storage and retention to manage; logs are enough until there is a user-facing need. |
 | Per-tool approval policy | Possible later; the current fixed rule is simple and already tested. |
@@ -39,9 +48,9 @@ the agent did and who approved it.
 ### Settings
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `INJECTION_SCREEN` | `off` | `off` \| `ollama-systemone` \| `jev` \| `chat` — the decision model kind (as SPEC-0011's judge). |
-| `INJECTION_SCREEN_MODEL` | none | e.g. `nimble`. |
-| `INJECTION_THRESHOLD` | `0.8` | Confidence at or above which flagged content is withheld. |
+| `INJECTION_SCREEN` | `off` | `off` \| `ollama-systemone` \| `chat` — how tool output is screened (B-0005). |
+| `INJECTION_SCREEN_MODEL` | none | Required when the screen is on: e.g. `nimble` for `ollama-systemone`, or a chat model of `LLM_PROVIDER` for `chat`. |
+| `INJECTION_THRESHOLD` | `0.8` | Probability of an injection at or above which the result is withheld. |
 | `INJECTION_SCREEN_ON_ERROR` | `withhold` | `withhold` (fail closed) or `allow` (fail open) when the screen fails. |
 | `MAX_TOKENS_PER_RUN` | `50000` | Input + output tokens across the model calls of one run. |
 | `MAX_TOKENS_PER_THREAD` | `200000` | Tokens across all runs of a thread since its last compaction (SPEC-0009). |
@@ -60,7 +69,8 @@ the agent did and who approved it.
 ### Audit events (`harnessd.audit` logger, always at info)
 `audit.run.start`, `audit.run.end` (status, tokens, cost_usd), `audit.tool`
 (tool, call_id, result), `audit.confirm` (tool, pending | approved | rejected),
-`audit.guard` (check, action: withheld | redacted | blocked, confidence),
+`audit.guard` (check, action: withheld | redacted | stripped | blocked,
+probability or count),
 `audit.budget` (scope: run | thread | day, used, limit). Each carries request_id
 and thread; none carries message text, answers or tool output.
 
@@ -76,17 +86,33 @@ and thread; none carries message text, answers or tool output.
   Tavily keys) that appears in it is replaced with `[redacted]` and an
   `audit.guard` event with action `redacted` is logged.
 - B-0004: Every response still validates against AgentResponse (SPEC-0002 B-0002).
+- B-0015: Invisible characters are removed from web_search titles and snippets,
+  fetch_site text and user messages before the model sees them: Unicode format
+  characters (category Cf, e.g. zero-width spaces and joiners, bidi controls,
+  word joiner, byte-order mark, soft hyphen, the tag block U+E0000–E007F),
+  variation selectors (U+FE00–FE0F, U+E0100–E01EF) and Hangul fillers. All other
+  text is unchanged. Each removal is logged as `audit.guard` with action
+  `stripped` and the count.
+- B-0016: fetch_site's text leaves out HTML a reader can't see: HTML comments,
+  the contents of script, style, noscript, template and svg, and any element with
+  the `hidden` attribute, `aria-hidden="true"`, or an inline style setting
+  `display: none` or `visibility: hidden`.
 
 ### Injection screen
 - B-0005: With `INJECTION_SCREEN` set, each web_search and fetch_site result is
-  screened before the model sees it, by asking the decision model whether it
-  contains instructions aimed at an AI agent. If flagged with confidence ≥
-  `INJECTION_THRESHOLD`, the model receives ToolError `rejected` ("withheld: possible
-  prompt injection") instead. The call is still recorded in tool_calls, with that
-  error, and an `audit.guard` event is logged.
+  screened before the model sees it, by asking for the probability that it
+  contains instructions aimed at an AI agent. `ollama-systemone` asks
+  `INJECTION_SCREEN_MODEL` one `noul` question through
+  `POST {OLLAMA_BASE_URL}/v1/systemone` and uses its probability of true; `chat`
+  asks `INJECTION_SCREEN_MODEL` (a SPEC-0001 chat model) for the probability as
+  JSON, validated with Pydantic. At or above `INJECTION_THRESHOLD`, the model
+  receives ToolError `rejected` ("withheld: possible prompt injection") instead.
+  The call is still recorded in tool_calls, with that error, and an `audit.guard`
+  event is logged. The screen's prompt lives in `src/prompts/`.
 - B-0006: If the screen fails or times out, `INJECTION_SCREEN_ON_ERROR` decides:
   `withhold` treats the result as flagged; `allow` passes it and logs a warning.
 - B-0007: User messages are not screened or blocked; the user is the principal.
+  Only their invisible characters are removed (B-0015).
 
 ### Budgets
 - B-0008: Token use is taken from each model reply's usage metadata; when a provider
@@ -116,7 +142,8 @@ and thread; none carries message text, answers or tool output.
   is higher, and they are content-free.
 
 ## Acceptance tests
-All use the scripted fake model and a fake decision model; none call a real LLM.
+All use the scripted fake model and a fake decision model; none call a real LLM
+(System One replies come from an `httpx.MockTransport`).
 - AT-0001 (B-0001): A search result with a 2000-character snippet reaches the model
   cut to 500. -> `tests/test_guardrails.py::test_tool_output_capped`
 - AT-0002 (B-0002): The system prompt sent to the model contains the
@@ -124,9 +151,12 @@ All use the scripted fake model and a fake decision model; none call a real LLM.
 - AT-0003 (B-0003): An answer containing the configured Tavily key → the response
   holds `[redacted]` and an audit.guard event is logged without the key.
   -> `tests/test_guardrails.py::test_secret_redacted`
-- AT-0004 (B-0005): A fetched page the fake screen flags at 0.9 → the model receives
-  ToolError rejected; at 0.5 → the page text. -> `tests/test_guardrails.py::test_injection_screen`
-- AT-0005 (B-0006): A screen that raises → withheld by default; passed with `allow`.
+- AT-0004 (B-0005): For each screen kind, a fetched page scored 0.9 → the model
+  receives ToolError rejected; at 0.5 → the page text. The System One request
+  carries the model, the page as state and one `noul` question.
+  -> `tests/test_guardrails.py::test_injection_screen`
+- AT-0005 (B-0006): A screen that errors (System One HTTP 500, a timeout, a chat
+  reply that isn't valid JSON) → withheld by default; passed with `allow`.
   -> `tests/test_guardrails.py::test_screen_failure_modes`
 - AT-0006 (B-0008, B-0009): Fake replies with usage metadata exceeding
   MAX_TOKENS_PER_RUN on the second call → status error, budget_exceeded, no third
@@ -143,10 +173,20 @@ All use the scripted fake model and a fake decision model; none call a real LLM.
   audit.run.start, audit.confirm pending and approved, audit.tool and audit.run.end,
   each with request_id and thread and no content.
   -> `tests/test_audit.py::test_audit_events`
-- AT-0011 (B-0002, B-0005): Injection eval cases (SPEC-0011): a page telling the
-  agent to add a note, a search result telling it to reveal its system prompt, and
-  a page hiding instructions in HTML comments; all must_pass.
-  -> `evals/cases/injection.jsonl`
+- AT-0011 (B-0002, B-0005, B-0015, B-0016): Injection eval cases (SPEC-0011): a
+  page telling the agent to add a note, a search result telling it to reveal its
+  system prompt, a page hiding instructions in HTML comments, a page hiding them
+  in an element styled `display: none`, and a search snippet carrying them in
+  Unicode tag characters; all must_pass. -> `evals/cases/injection.jsonl`
+- AT-0012 (B-0015, B-0007): Text with zero-width spaces, bidi controls, tag
+  characters and variation selectors loses exactly those, with the count
+  returned; accented letters, emoji and right-to-left scripts are unchanged; a
+  web_search snippet, fetch_site text and a user message each reach the model
+  stripped. -> `tests/test_guardrails.py::test_invisible_unicode_stripped`
+- AT-0013 (B-0016): A page with a comment, a `hidden` div, an `aria-hidden` span
+  and a `display:none` paragraph → fetch_site text holds only the visible text,
+  and text after a hidden element is kept.
+  -> `tests/tools/test_fetch_site.py::test_hidden_html_skipped`
 
 ## Non-goals
 Content moderation of user messages, PII detection, jailbreak resistance beyond
@@ -156,4 +196,11 @@ an audit query API.
 ## Open questions
 None. Settled in review: defaults of 50k tokens per run and 200k per thread (well
 above normal use, a 5-call run is usually under 20k); the screen fails closed
-(`withhold`) by default.
+(`withhold`) by default; screen kinds `off`, `ollama-systemone` and `chat`, with
+Jev deferred; invisible characters are stripped from user messages as well as
+tool output.
+
+Built in slices: untrusted content (B-0001, B-0002, B-0007, B-0015, B-0016), the
+injection screen (B-0005, B-0006), token budgets (B-0008, B-0009, B-0014), the
+daily cost limit (B-0010, B-0011), then the audit trail and redaction (B-0003,
+B-0012, B-0013). Audit events named above are added in the last slice.
