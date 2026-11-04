@@ -21,6 +21,7 @@ from agent.persistence import (
     open_checkpointer,
 )
 from agent.runner import AgentRunner
+from agent.screen import build_screen
 from agent.threads import ThreadService
 from logs import get_logger
 from settings import Settings, get_settings
@@ -67,6 +68,7 @@ class Services:
                     ToolContext(settings=settings),
                     TOOLS,
                     saver,
+                    screen=build_screen(settings),
                 )
             return self._graph
 

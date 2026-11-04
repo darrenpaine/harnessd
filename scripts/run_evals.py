@@ -66,6 +66,7 @@ async def run(args: argparse.Namespace) -> int:
 
     from agent.llm import build_chat_model
     from agent.persistence import REDIS_ERRORS, RedisThreadGuard, open_checkpointer
+    from agent.screen import build_screen
     from evals.dataset import EvalDatabaseError, load_cases, select
     from evals.records import model_key, write_run
     from evals.report import (
@@ -142,6 +143,7 @@ async def run(args: argparse.Namespace) -> int:
                     saver,
                     RedisThreadGuard(redis, settings),
                     Path(notes),
+                    screen=build_screen(settings),
                 )
                 record = await run_cases(
                     runner,

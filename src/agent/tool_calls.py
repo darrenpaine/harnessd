@@ -1,6 +1,7 @@
 """What the graph does with one tool call: validate, run or refuse, and record
 it, with its log event and span (SPEC-0001 B-0003..B-0005). Read-only tools'
-output loses invisible characters before the model sees it (SPEC-0012 B-0015)."""
+output loses invisible characters (SPEC-0012 B-0015), then passes the injection
+screen if one is on (B-0005, B-0006), before the model sees it."""
 
 import logging
 import time
@@ -10,8 +11,10 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, InvalidToolCall, ToolMessage
 from langchain_core.messages.tool import ToolCall
+from opentelemetry.trace import Span
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from agent.screen import Screen
 from logs import clip, elapsed_ms, event, get_logger
 from schemas import PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
@@ -20,6 +23,7 @@ from tracing import tool_result, tool_span
 
 MALFORMED = ToolError(code="invalid_input", message="arguments are not valid JSON")
 REJECTED = ToolError(code="rejected", message="the user declined this call")
+WITHHELD = ToolError(code="rejected", message="withheld: possible prompt injection")
 
 # tool.call stays on the graph's logger, where it was before this module existed.
 log = get_logger("graph")
@@ -48,9 +52,12 @@ def tool_message(result: BaseModel, call_id: str | None) -> ToolMessage:
 class ToolCalls:
     """The graph's tools, and what happens to each call the model makes."""
 
-    def __init__(self, tools: Tools, ctx: ToolContext) -> None:
+    def __init__(
+        self, tools: Tools, ctx: ToolContext, screen: Screen | None = None
+    ) -> None:
         self._tools = tools
         self._ctx = ctx
+        self._screen = screen
 
     def check(self, call: ToolCall) -> ToolError | None:
         """Why the call can't run (SPEC-0001 B-0004), or None."""
@@ -117,9 +124,36 @@ class ToolCalls:
             result: BaseModel = await call_tool(tool, call["args"], self._ctx)
             if not tool.side_effect and not isinstance(result, ToolError):
                 result, _ = strip_model(result)
+                result = await self._screened(call, result, span)
             tool_result(span, result)
         _log_call(call, result, started)
         return result
+
+    async def _screened(
+        self, call: ToolCall, result: BaseModel, span: Span
+    ) -> BaseModel:
+        """`result`, or WITHHELD if the screen flags it (SPEC-0012 B-0005). The
+        screen reads what the model would, so no field goes unscreened. Any screen
+        failure is settled by INJECTION_SCREEN_ON_ERROR (B-0006)."""
+        if self._screen is None:
+            return result
+        settings = self._ctx.settings
+        try:
+            probability = await self._screen.probability(result.model_dump_json())
+        except Exception as exc:
+            event(
+                log,
+                logging.WARNING,
+                "screen.failed",
+                tool=call["name"],
+                call_id=call["id"],
+                error=type(exc).__name__,
+                on_error=settings.injection_screen_on_error,
+            )
+            withhold = settings.injection_screen_on_error == "withhold"
+            return WITHHELD if withhold else result
+        span.set_attribute("screen.probability", probability)
+        return WITHHELD if probability >= settings.injection_threshold else result
 
 
 def _record(call: ToolCall, data: BaseModel, result: BaseModel) -> dict[str, Any]:

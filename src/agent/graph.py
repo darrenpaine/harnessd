@@ -22,6 +22,7 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 
+from agent.screen import Screen
 from agent.tool_calls import ToolCalls, Tools, tool_message
 from logs import elapsed_ms, event, get_logger
 from prompts import SYSTEM_PROMPT
@@ -205,10 +206,13 @@ def build_graph(
     ctx: ToolContext,
     tools: Tools,
     checkpointer: BaseCheckpointSaver[Any],
+    *,
+    screen: Screen | None = None,
 ) -> AgentGraph:
-    """Compile the agent loop with its checkpointer."""
+    """Compile the agent loop with its checkpointer. `screen` is the injection
+    screen, or None when it is off (SPEC-0012 B-0005)."""
     bound = model.bind_tools([tool_schema(tool) for tool in tools.values()])
-    calls = ToolCalls(tools, ctx)
+    calls = ToolCalls(tools, ctx, screen)
 
     async def call_model(state: AgentState) -> Command[str]:
         _step("model")

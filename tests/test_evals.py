@@ -197,6 +197,37 @@ async def test_stub_tools(tool_context: ToolContext, tmp_path: Path) -> None:
     assert json.loads(str(results[0].content)) == canned.model_dump(mode="json")
 
 
+@pytest.mark.spec("SPEC-0012", "B-0005")
+async def test_case_runner_screens_stubs(
+    tool_context: ToolContext, tmp_path: Path
+) -> None:
+    class Flagging:
+        async def probability(self, text: str) -> float:
+            return 0.9
+
+    stub_case = case(
+        tool_outputs={
+            "fetch_site": {"url": "https://x.example/", "text": "S", "truncated": False}
+        },
+    )
+    replies = [tool_turn(fetch("page")), AIMessage(content="done")]
+    case_runner = CaseRunner(
+        ScriptedChatModel(replies=replies),
+        tool_context.settings,
+        InMemorySaver(),
+        LocalThreadGuard(),
+        tmp_path / "eval-notes",
+        screen=Flagging(),
+    )
+
+    attempt = await case_runner.attempt(stub_case)
+
+    [turn] = attempt.turns
+    assert turn.response is not None
+    [record] = turn.response.tool_calls
+    assert record.error is not None and record.error.code == "rejected"
+
+
 @pytest.mark.spec("SPEC-0011", "B-0002")
 async def test_case_runner_records_errors_and_tokens(
     tool_context: ToolContext, tmp_path: Path
