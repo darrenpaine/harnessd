@@ -1,5 +1,6 @@
 """Pydantic models for the API (SPEC-0002, SPEC-0009), tool I/O (SPEC-0003),
-a thread's graph state (AgentThreads) and eval cases (SPEC-0011)."""
+a thread's graph state (AgentThreads), eval cases (SPEC-0011) and the injection
+screen (SPEC-0012)."""
 
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
@@ -504,3 +505,52 @@ class EvalCase(_Model):
     @property
     def expect_blocks(self) -> list[EvalExpect]:
         return self.expect if isinstance(self.expect, list) else [self.expect]
+
+
+# --- Injection screen (SPEC-0012 B-0005) -------------------------------------
+
+Probability = Annotated[float, Field(strict=True, ge=0, le=1)]
+
+
+class SystemOneQuestion(_Model):
+    type: Literal["noul"] = "noul"
+    instructions: str
+
+
+class SystemOneQuestions(_Model):
+    injection: SystemOneQuestion
+
+
+class SystemOneRequest(_Model):
+    """Body of `POST /v1/systemone`."""
+
+    model: str
+    state: str = Field(min_length=1)
+    questions: SystemOneQuestions
+    keep_alive: str = "5m"
+
+
+class SystemOneAnswer(_Model):
+    type: Literal["noul"]
+    noul: Probability  # the probability of true
+
+
+class SystemOneAnswers(_Model):
+    injection: SystemOneAnswer
+
+
+class SystemOneUsage(_Model):
+    input_tokens: int
+    output_tokens: int
+
+
+class SystemOneReply(_Model):
+    model: str
+    answers: SystemOneAnswers
+    usage: SystemOneUsage
+
+
+class ChatScreenReply(_Model):
+    """What a chat model must reply with when it acts as the screen."""
+
+    probability: Probability
