@@ -48,7 +48,7 @@ class WebSearchInput(_Model):
 class WebSearchResult(_Model):
     title: str
     url: str
-    snippet: str
+    snippet: str = Field(max_length=500)
 
 
 class WebSearchOutput(_Model):

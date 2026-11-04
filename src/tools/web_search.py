@@ -13,6 +13,8 @@ from tavily import (
 from schemas import WebSearchInput, WebSearchOutput, WebSearchResult
 from tools.base import Tool, ToolContext, ToolFailure
 
+MAX_SNIPPET_CHARS = 500  # SPEC-0012 B-0001
+
 _UPSTREAM_ERRORS = (
     httpx.HTTPError,
     BadRequestError,
@@ -44,7 +46,7 @@ def _results(body: Any) -> list[WebSearchResult]:
         WebSearchResult(
             title=str(item.get("title", "")),
             url=str(item.get("url", "")),
-            snippet=str(item.get("content", "")),
+            snippet=str(item.get("content", ""))[:MAX_SNIPPET_CHARS],
         )
         for item in items
         if isinstance(item, dict)

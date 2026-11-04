@@ -1,5 +1,6 @@
 """What the graph does with one tool call: validate, run or refuse, and record
-it, with its log event and span (SPEC-0001 B-0003..B-0005)."""
+it, with its log event and span (SPEC-0001 B-0003..B-0005). Read-only tools'
+output loses invisible characters before the model sees it (SPEC-0012 B-0015)."""
 
 import logging
 import time
@@ -14,6 +15,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from logs import clip, elapsed_ms, event, get_logger
 from schemas import PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
+from tools.sanitize import strip_model
 from tracing import tool_result, tool_span
 
 MALFORMED = ToolError(code="invalid_input", message="arguments are not valid JSON")
@@ -113,6 +115,8 @@ class ToolCalls:
         with tool_span(call["name"], call["id"], call["args"]) as span:
             started = time.perf_counter()
             result: BaseModel = await call_tool(tool, call["args"], self._ctx)
+            if not tool.side_effect and not isinstance(result, ToolError):
+                result, _ = strip_model(result)
             tool_result(span, result)
         _log_call(call, result, started)
         return result

@@ -85,7 +85,8 @@ def note(text: str) -> tuple[str, dict[str, Any]]:
 
 
 class Agent:
-    """A runner over the real tools, with fetch_site served by a mock transport."""
+    """A runner over the real tools, with their HTTP served by a mock transport:
+    PAGE_TEXT as text/plain, or `serve` when given."""
 
     def __init__(
         self,
@@ -95,8 +96,10 @@ class Agent:
         delay: float = 0,
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         guard: ThreadGuard | None = None,
+        serve: Callable[[httpx.Request], httpx.Response] | None = None,
     ) -> None:
         self.fetched: list[str] = []
+        self._custom = serve
         self.model = ScriptedChatModel(replies=replies, delay=delay)
         self.ctx = dataclasses.replace(ctx, transport=httpx.MockTransport(self._serve))
         self.graph = build_graph(
@@ -107,6 +110,8 @@ class Agent:
 
     def _serve(self, request: httpx.Request) -> httpx.Response:
         self.fetched.append(str(request.url))
+        if self._custom is not None:
+            return self._custom(request)
         return httpx.Response(
             200, headers={"content-type": "text/plain"}, text=PAGE_TEXT
         )
