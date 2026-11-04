@@ -17,6 +17,7 @@ from tools.base import ToolContext
 from tools.sanitize import strip_invisible
 
 ZERO_WIDTH = "​‌‍⁠﻿"
+# Not empty: holds hidden bidi controls (U+202E, U+2066, U+2069).
 BIDI = "‮⁦⁩"
 SELECTORS = "️\U000e0100"
 
