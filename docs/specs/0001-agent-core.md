@@ -1,6 +1,6 @@
 # SPEC-0001: Agent core
 
-Status: implemented
+Status: draft
 Requirements: R-0007, R-0008, R-0025
 Design: [design.md](../design/design.md)
 
@@ -19,14 +19,18 @@ and persistence are SPEC-0004.
 
 ### Model
 Provider-agnostic tool-calling chat model chosen by settings
-(`LLM_PROVIDER` = ollama | anthropic | google, `LLM_MODEL`, provider keys).
+(`LLM_PROVIDER` = ollama | anthropic | google | openai, `LLM_MODEL`, provider keys:
+`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`).
 Ollama is the local default. Built by `build_chat_model()` in `src/agent/llm.py`.
 `LLM_REQUESTS_PER_MINUTE` (int ≥ 1, unset by default) paces the model's calls to
 fit a provider quota, such as a free tier's requests-per-minute limit (B-0008).
 
 ## Behavior
 - B-0001: The LLM provider is selected by settings; no code change is needed to switch
-  between Ollama, Anthropic and Google. Building the model makes no network calls.
+  between Ollama, Anthropic, Google and OpenAI. `LLM_PROVIDER=anthropic` requires
+  `ANTHROPIC_API_KEY`, `google` requires `GOOGLE_API_KEY` and `openai` requires
+  `OPENAI_API_KEY`; a missing or empty key fails settings at startup. Building the
+  model makes no network calls.
 - B-0002: The agent runs at most max_tool_calls tool calls per request. Errored calls
   count. If a model turn requests more calls than remain, none of that batch runs and
   the run ends with status="truncated". `answer` then holds the text of that model
@@ -62,8 +66,12 @@ fit a provider quota, such as a free tier's requests-per-minute limit (B-0008).
 
 ## Acceptance tests
 All use a scripted fake model (SPEC-0005).
-- AT-0001 (B-0001): Settings for each provider build the matching chat model without
-  network calls. -> `tests/test_settings.py::test_provider_selection`
+- AT-0001 (B-0001): Settings for each provider (ollama, anthropic, google, openai)
+  build the matching chat model without network calls. Each hosted provider with no
+  key is a settings error, and so is an empty key.
+  -> `tests/test_settings.py::test_provider_selection`,
+  `tests/test_settings.py::test_hosted_provider_requires_key`,
+  `tests/test_settings.py::test_empty_key_counts_as_missing`
 - AT-0002 (B-0002): Fake model requests one tool → tool_calls has one entry with
   matching input/output, status="ok". -> `tests/test_agent.py::test_single_tool_call_traced`
 - AT-0003 (B-0002): Fake model always requests a tool → stops after max_tool_calls,
@@ -87,13 +95,15 @@ All use a scripted fake model (SPEC-0005).
 - AT-0010 (B-0007): After a truncated run, the next message's model call receives a
   ToolError `internal` for each call that never ran.
   -> `tests/test_agent.py::test_thread_usable_after_truncation`
-- AT-0011 (B-0008): Settings for each provider with `LLM_REQUESTS_PER_MINUTE=600`
-  build a model whose calls are spaced 0.1 s apart with no burst, and without
-  the setting a model with no pacing; no network calls.
+- AT-0011 (B-0008): Settings for each provider (ollama, anthropic, google, openai)
+  with `LLM_REQUESTS_PER_MINUTE=600` build a model whose calls are spaced 0.1 s
+  apart with no burst, and without the setting a model with no pacing; no network
+  calls.
   -> `tests/test_settings.py::test_provider_rate_limit`
 
 ## Non-goals
-Multi-agent routing, streaming, model fallback between providers.
+Multi-agent routing, streaming, model fallback between providers, a base URL
+setting for OpenAI-compatible servers (see Open questions).
 
 ## Open questions
 None.
