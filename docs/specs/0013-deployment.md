@@ -1,6 +1,6 @@
 # SPEC-0013: Deployment
 
-Status: reviewed
+Status: draft
 Requirements: R-0017
 Design: [design.md](../design/design.md)
 
@@ -87,8 +87,8 @@ Provider versions are pinned in `versions.tf` and `.terraform.lock.hcl` is commi
 | `REDIS_MAX_CONNECTIONS` | `5` | Per process, for the one pool shared by the checkpointer and the lock client (B-0003). Reserved concurrency × this must stay within the database's connection limit. |
 
 ### Secrets (SSM, under `SSM_PARAMETER_PATH`)
-`GOOGLE_API_KEY` or `ANTHROPIC_API_KEY`, `TAVILY_API_KEY`, `API_KEY` and
-`REDIS_URL`. Terraform creates the parameter names. Values are set outside
+`GOOGLE_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, `TAVILY_API_KEY`,
+`API_KEY` and `REDIS_URL`. Terraform creates the parameter names. Values are set outside
 Terraform (`aws ssm put-parameter`), except `REDIS_URL`, which Terraform writes
 from the database it creates. The state bucket is encrypted and readable only by
 the deploy roles.
@@ -186,6 +186,10 @@ Ollama in the cloud, blue/green deploys, MCP.
   database, is unconfirmed. This is checked first at implementation (docs, then the
   checkpointer tests against a hand-made free database), and only then is the
   database plan chosen (free, or the smallest paid Essentials plan).
+- OpenAI in the cloud: `OPENAI_API_KEY` can be loaded like the other keys, but the
+  cloud model stays as settled below. Should OpenAI be a named alternative? It
+  would need a SPEC-0012 price row first, as `DAILY_COST_LIMIT_USD` is required in
+  the cloud.
 
 Settled in review: Gemini Flash-Lite as the cloud model; a $5 monthly AWS budget;
 `deploy.yml` runs manually and on `v*` tags. The alert email is a Terraform
