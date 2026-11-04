@@ -1,6 +1,6 @@
 # SPEC-0011: Evals
 
-Status: reviewed
+Status: draft
 Requirements: R-0015
 Design: [design.md](../design/design.md)
 
@@ -144,10 +144,12 @@ Runs need Redis (`make redis`), as the redis tests do.
 
 ### Settings
 `EVAL_REPEATS` (default 3), `EVAL_REGRESSION_POINTS` (default 5),
-`EVAL_JUDGE` (`chat`; unset → no judge), `EVAL_JUDGE_PROVIDER` (default
-`LLM_PROVIDER`), `EVAL_JUDGE_MODEL` (e.g. `gemma4:12b` on Ollama; required with a
-judge), `EVAL_JUDGE_MIN_CONFIDENCE` (default 0.7). The judge model uses the
-provider's existing settings (keys, `OLLAMA_BASE_URL`). On a provider with a
+`EVAL_JUDGE` (`chat`; unset → no judge), `EVAL_JUDGE_PROVIDER` (ollama, anthropic,
+google or openai, as `LLM_PROVIDER` in SPEC-0001; default `LLM_PROVIDER`),
+`EVAL_JUDGE_MODEL` (e.g. `gemma4:12b` on Ollama; required with a judge),
+`EVAL_JUDGE_MIN_CONFIDENCE` (default 0.7). The judge model uses the provider's
+existing settings (keys, `OLLAMA_BASE_URL`), so a hosted judge needs its provider's
+key (SPEC-0001 B-0001) even when `LLM_PROVIDER` is another one. On a provider with a
 requests-per-minute quota, such as a free tier, set `LLM_REQUESTS_PER_MINUTE`
 (SPEC-0001 B-0008) so the evaluated and judge models wait instead of failing
 cases with rate-limit errors.
