@@ -106,4 +106,39 @@ Multi-agent routing, streaming, model fallback between providers, a base URL
 setting for OpenAI-compatible servers (see Open questions).
 
 ## Open questions
-None.
+All are about the OpenAI provider. Facts about `langchain-openai` were read from
+the 1.7.4 release on PyPI on 2026-11-04.
+- Dependency: `ChatOpenAI` comes from `langchain-openai`, which is not a dependency
+  yet. It needs the user's approval before implementation. Release 1.7.4 needs
+  `langchain-core>=1.7.5` and adds `openai`; `uv.lock` has `langchain-core` 1.6.10,
+  so approval has to cover that upgrade too, or an older release.
+- Base URL: out of scope for now, so no setting is added. `ChatOpenAI` still reads
+  `OPENAI_API_BASE` from the process environment and the `openai` SDK reads
+  `OPENAI_BASE_URL`, and docker compose passes all of `.env` to the app. Either one
+  sends calls and the key to another server without going through Settings. Should
+  `build_chat_model()` pin the base URL, or is this left as it is?
+- Rate limits: `rate_limiter` is a LangChain chat model field, so B-0008 applies to
+  `ChatOpenAI` unchanged. It paces requests only, so a tokens-per-minute limit can
+  still refuse a call (503, SPEC-0002 B-0007). Retries inside the `openai` SDK
+  happen within one paced call, so they aren't spaced by B-0008. Proposed: no
+  change, and leave `max_retries` at its default.
+- Responses API: `ChatOpenAI` picks the Responses API by itself for some model
+  names and otherwise uses Chat Completions. Replies then hold content blocks. The
+  agent reads `.text`, tool_calls and invalid_tool_calls, so it should cope, but
+  saved history (B-0007) is only exercised against a real model in evals. Proposed:
+  keep the default, and run `make evals` on the chosen model before SPEC-0001 is
+  marked implemented. No OpenAI model is named here; that choice is `LLM_MODEL`.
+- Tool schemas: `bind_tools` is not strict by default, which fits the schemas here,
+  as they drop `additionalProperties` for Gemini. Arguments are checked against the
+  tool's Input model anyway (B-0004). Proposed: stay non-strict.
+- Prices: SPEC-0012's price table has no OpenAI rows, and `src/agent/prices.py`
+  isn't built yet. With `DAILY_COST_LIMIT_USD` set, an unpriced OpenAI model is a
+  settings error (SPEC-0012 B-0011), so the failure is safe. Table rows are added
+  with the budgets, for the models actually used; cached input is then charged at
+  the full input price, which overstates spend. SPEC-0011 has no prices. Proposed:
+  no spec change.
+
+When this is built, `tests/test_settings.py::test_unknown_provider_rejected` needs
+another name, as it uses `openai` as the unknown provider, and `OPENAI_API_KEY`
+joins `SECRET_ENV_VARS` in `tests/conftest.py` (SPEC-0005). `README.md`, `.env.example`
+and `docs/design/design.md` describe what is built, so they change with the code.
