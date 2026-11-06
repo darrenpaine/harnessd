@@ -23,7 +23,8 @@ the agent did and who approved it.
 - **System One screen on the app's Ollama.** The screen asks Bespoke Labs'
   `nimble` through Ollama's `/v1/systemone` endpoint, which already runs beside the
   app, for the probability that text tries to direct an AI agent that reads it.
-  A chat model can do the same job where no decision model is available.
+  A chat model can do the same job where no decision model is available. `nimble`
+  stays loaded all the time, as it is used outside this app too.
 - **Budgets at three levels.** Per run (a runaway loop), per thread (one long
   conversation) and per day (total spend), so no single failure mode is
   unbounded.
@@ -52,7 +53,6 @@ the agent did and who approved it.
 | `INJECTION_SCREEN_MODEL` | none | Required when the screen is on: e.g. `nimble` for `ollama-systemone`, or a chat model of `LLM_PROVIDER` for `chat`. |
 | `INJECTION_THRESHOLD` | `0.8` | Probability of an injection at or above which the result is withheld. |
 | `INJECTION_SCREEN_ON_ERROR` | `withhold` | `withhold` (fail closed) or `allow` (fail open) when the screen fails. |
-| `INJECTION_SCREEN_KEEP_ALIVE` | `1h` | How long Ollama keeps the model loaded after a call, sent as `keep_alive` with each `ollama-systemone` request (B-0017). |
 | `MAX_TOKENS_PER_RUN` | `50000` | Input + output tokens across the model calls of one run. |
 | `MAX_TOKENS_PER_THREAD` | `200000` | Tokens across all runs of a thread since its last compaction (SPEC-0009). |
 | `DAILY_COST_LIMIT_USD` | none | Total spend per UTC day across all threads; unset → no daily cap. |
@@ -120,8 +120,10 @@ and thread; none carries message text, answers or tool output.
 - B-0006: A screen call times out after 20 seconds. If the screen fails or times
   out, `INJECTION_SCREEN_ON_ERROR` decides: `withhold` treats the result as flagged;
   `allow` passes it. Either way a `screen.failed` warning is logged (SPEC-0008).
-- B-0017: With `ollama-systemone`, the app loads the model in the background at
-  startup, as `nimble` can take minutes to load and B-0006 allows 20 seconds. Startup
+- B-0017: Each `ollama-systemone` request sends `keep_alive: -1`, so the model
+  stays loaded and the app never shortens that for its other users. The app also
+  loads the model in the background at startup, as Ollama starts with nothing loaded,
+  `nimble` can take minutes to load and B-0006 allows 20 seconds. Startup
   doesn't wait for it, and it has a 5 minute timeout of its own. If it fails, a
   `screen.preload_failed` warning is logged and the app keeps running; B-0006 covers
   any call made before the model is ready. An eval run waits for this load before
@@ -169,7 +171,7 @@ All use the scripted fake model and a fake decision model; none call a real LLM
 - AT-0004 (B-0005): For each screen kind, a fetched page scored 0.9 → the model
   receives ToolError rejected; at 0.5 → the page text. The System One request
   carries the model, the result's JSON (holding the page) as state, one `noul`
-  question and `INJECTION_SCREEN_KEEP_ALIVE`.
+  question and `keep_alive: -1`.
   -> `tests/test_guardrails.py::test_injection_screen`
 - AT-0005 (B-0006): A screen that errors (System One HTTP 500, a timeout, a chat
   reply that isn't valid JSON) → withheld by default; passed with `allow`; a

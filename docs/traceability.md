@@ -129,20 +129,20 @@ None.
 - docs/specs/0012-guardrails.md:91: SPEC-0012 B-0004 has no acceptance test
 - docs/specs/0012-guardrails.md:91: SPEC-0012 B-0004 is named by no test marker
 - docs/specs/0012-guardrails.md:123: SPEC-0012 B-0017 is named by no test marker
-- docs/specs/0012-guardrails.md:133: SPEC-0012 B-0008 is named by no test marker
-- docs/specs/0012-guardrails.md:136: SPEC-0012 B-0009 is named by no test marker
-- docs/specs/0012-guardrails.md:140: SPEC-0012 B-0014 is named by no test marker
-- docs/specs/0012-guardrails.md:145: SPEC-0012 B-0010 is named by no test marker
-- docs/specs/0012-guardrails.md:149: SPEC-0012 B-0011 is named by no test marker
-- docs/specs/0012-guardrails.md:153: SPEC-0012 B-0012 is named by no test marker
-- docs/specs/0012-guardrails.md:155: SPEC-0012 B-0013 is named by no test marker
-- docs/specs/0012-guardrails.md:166: SPEC-0012 AT-0003: no test test_secret_redacted in tests/test_guardrails.py
-- docs/specs/0012-guardrails.md:178: SPEC-0012 AT-0006: no file tests/test_budgets.py
-- docs/specs/0012-guardrails.md:182: SPEC-0012 AT-0007: no file tests/test_budgets.py
-- docs/specs/0012-guardrails.md:185: SPEC-0012 AT-0008: no file tests/test_budgets.py
-- docs/specs/0012-guardrails.md:187: SPEC-0012 AT-0009: no test test_daily_limit_needs_price in tests/test_settings.py
-- docs/specs/0012-guardrails.md:189: SPEC-0012 AT-0010: no file tests/test_audit.py
-- docs/specs/0012-guardrails.md:209: SPEC-0012 AT-0014: no test test_screen_preload in tests/test_guardrails.py
+- docs/specs/0012-guardrails.md:135: SPEC-0012 B-0008 is named by no test marker
+- docs/specs/0012-guardrails.md:138: SPEC-0012 B-0009 is named by no test marker
+- docs/specs/0012-guardrails.md:142: SPEC-0012 B-0014 is named by no test marker
+- docs/specs/0012-guardrails.md:147: SPEC-0012 B-0010 is named by no test marker
+- docs/specs/0012-guardrails.md:151: SPEC-0012 B-0011 is named by no test marker
+- docs/specs/0012-guardrails.md:155: SPEC-0012 B-0012 is named by no test marker
+- docs/specs/0012-guardrails.md:157: SPEC-0012 B-0013 is named by no test marker
+- docs/specs/0012-guardrails.md:168: SPEC-0012 AT-0003: no test test_secret_redacted in tests/test_guardrails.py
+- docs/specs/0012-guardrails.md:180: SPEC-0012 AT-0006: no file tests/test_budgets.py
+- docs/specs/0012-guardrails.md:184: SPEC-0012 AT-0007: no file tests/test_budgets.py
+- docs/specs/0012-guardrails.md:187: SPEC-0012 AT-0008: no file tests/test_budgets.py
+- docs/specs/0012-guardrails.md:189: SPEC-0012 AT-0009: no test test_daily_limit_needs_price in tests/test_settings.py
+- docs/specs/0012-guardrails.md:191: SPEC-0012 AT-0010: no file tests/test_audit.py
+- docs/specs/0012-guardrails.md:211: SPEC-0012 AT-0014: no test test_screen_preload in tests/test_guardrails.py
 - docs/specs/0013-deployment.md:106: SPEC-0013 B-0001 is named by no test marker
 - docs/specs/0013-deployment.md:110: SPEC-0013 B-0002 is named by no test marker
 - docs/specs/0013-deployment.md:113: SPEC-0013 B-0003 is named by no test marker
