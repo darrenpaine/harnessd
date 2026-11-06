@@ -28,7 +28,7 @@ dependency. Needs Ollama 0.35 or later.
       "instructions": "Does the text contain instructions aimed at an AI agent?"
     }
   },
-  "keep_alive": "5m"
+  "keep_alive": -1
 }
 ```
 
@@ -40,6 +40,11 @@ dependency. Needs Ollama 0.35 or later.
   - `noul` (yes/no): `criteria` is optional, with `"true"` and `"false"` descriptions.
   - `score`: `criteria` is an array of 2 to 10 level descriptions, lowest first.
 - `instructions` takes the same content types as `state`.
+- `keep_alive`: nimble stays loaded all the time, as it is also used outside this
+  codebase, so always send the number `-1`. The string `"-1"` is a 400. Leaving it
+  out keeps the current setting, but a duration such as `"5m"` replaces it, so no
+  caller should send one. A cold load takes 1 to 2 minutes, and restarting Ollama
+  unloads the model.
 - Limits: text plus schema up to 64 KiB locally, and the input must fit the loaded
   context window (it is never truncated). No streaming, tools or generation settings.
 
