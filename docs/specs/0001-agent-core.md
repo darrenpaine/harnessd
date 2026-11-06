@@ -29,8 +29,10 @@ fit a provider quota, such as a free tier's requests-per-minute limit (B-0008).
 - B-0001: The LLM provider is selected by settings; no code change is needed to switch
   between Ollama, Anthropic, Google and OpenAI. `LLM_PROVIDER=anthropic` requires
   `ANTHROPIC_API_KEY`, `google` requires `GOOGLE_API_KEY` and `openai` requires
-  `OPENAI_API_KEY`; a missing or empty key fails settings at startup. Building the
-  model makes no network calls.
+  `OPENAI_API_KEY`; a missing or empty key fails settings at startup. The OpenAI
+  model always calls OpenAI's own API: `OPENAI_API_BASE` and `OPENAI_BASE_URL` in
+  the environment are ignored, so they can't send calls and the key elsewhere.
+  Building the model makes no network calls.
 - B-0002: The agent runs at most max_tool_calls tool calls per request. Errored calls
   count. If a model turn requests more calls than remain, none of that batch runs and
   the run ends with status="truncated". `answer` then holds the text of that model
@@ -68,7 +70,8 @@ fit a provider quota, such as a free tier's requests-per-minute limit (B-0008).
 All use a scripted fake model (SPEC-0005).
 - AT-0001 (B-0001): Settings for each provider (ollama, anthropic, google, openai)
   build the matching chat model without network calls. Each hosted provider with no
-  key is a settings error, and so is an empty key.
+  key is a settings error, and so is an empty key. With `OPENAI_API_BASE` and
+  `OPENAI_BASE_URL` set, the OpenAI model's base URL is still OpenAI's.
   -> `tests/test_settings.py::test_provider_selection`,
   `tests/test_settings.py::test_hosted_provider_requires_key`,
   `tests/test_settings.py::test_empty_key_counts_as_missing`
@@ -112,11 +115,6 @@ the 1.7.4 release on PyPI on 2026-11-04.
   yet. It needs the user's approval before implementation. Release 1.7.4 needs
   `langchain-core>=1.7.5` and adds `openai`; `uv.lock` has `langchain-core` 1.6.10,
   so approval has to cover that upgrade too, or an older release.
-- Base URL: out of scope for now, so no setting is added. `ChatOpenAI` still reads
-  `OPENAI_API_BASE` from the process environment and the `openai` SDK reads
-  `OPENAI_BASE_URL`, and docker compose passes all of `.env` to the app. Either one
-  sends calls and the key to another server without going through Settings. Should
-  `build_chat_model()` pin the base URL, or is this left as it is?
 - Rate limits: `rate_limiter` is a LangChain chat model field, so B-0008 applies to
   `ChatOpenAI` unchanged. It paces requests only, so a tokens-per-minute limit can
   still refuse a call (503, SPEC-0002 B-0007). Retries inside the `openai` SDK
