@@ -2,6 +2,7 @@
 characters removed from user messages, the untrusted-data rule in the prompt, and
 the injection screen. Scripted model and mock transports; no real model or network."""
 
+import asyncio
 import dataclasses
 import json
 import logging
@@ -23,7 +24,14 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from pydantic import SecretStr
 
 import api.deps
-from agent.screen import ChatScreen, Screen, SystemOneScreen, build_screen
+from agent.screen import (
+    PRELOAD_TIMEOUT_SECONDS,
+    ChatScreen,
+    Screen,
+    SystemOneScreen,
+    build_screen,
+    preload,
+)
 from agent_support import (
     PAGE_TEXT,
     Agent,
@@ -34,9 +42,10 @@ from agent_support import (
     note,
     tool_turn,
 )
+from app import app
 from fakes import RaisingChatModel, ScriptedChatModel
 from prompts import INJECTION_SCREEN_PROMPT, SYSTEM_PROMPT
-from settings import Settings
+from settings import Settings, get_settings
 from tools.base import ToolContext
 from tools.sanitize import strip_invisible
 
@@ -90,6 +99,8 @@ async def test_untrusted_rule_in_prompt(tool_context: ToolContext) -> None:
     await agent.run(message="read it")
 
     assert "untrusted data" in SYSTEM_PROMPT and "never follow" in SYSTEM_PROMPT
+    # B-0005: a withheld result may be replaced from another source, and is reported.
+    assert "withheld" in SYSTEM_PROMPT and "another source" in SYSTEM_PROMPT
     system, *rest = agent.model.calls[1]
     assert isinstance(system, SystemMessage) and system.content == SYSTEM_PROMPT
     # The page reaches the model only as a tool result.
@@ -251,7 +262,7 @@ async def test_system_one_request() -> None:
         "questions": {
             "injection": {"type": "noul", "instructions": INJECTION_SCREEN_PROMPT}
         },
-        "keep_alive": "5m",
+        "keep_alive": -1,
     }
 
 
@@ -520,3 +531,71 @@ async def test_services_wire_the_screen(
     await api.deps.Services().graph(settings)
 
     assert isinstance(built["screen"], SystemOneScreen)
+
+
+# --- Preload (B-0017) -----------------------------------------------------------
+
+
+@pytest.mark.spec("SPEC-0012", "B-0017", "AT-0014")
+async def test_screen_preload(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """Startup asks Ollama to load the model without waiting for it, and a failed
+    load leaves the app serving requests; `off` and `chat` load nothing."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+    requests: list[httpx.Request] = []
+
+    async def slow_then_fail(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        started.set()
+        await release.wait()
+        return httpx.Response(500, json={"error": "loading failed"})
+
+    screen = SystemOneScreen(
+        OLLAMA, "nimble", transport=httpx.MockTransport(slow_then_fail)
+    )
+    settings = _screen_settings(
+        injection_screen="ollama-systemone",
+        injection_screen_model="nimble",
+        notes_path=tmp_path / "notes.txt",
+    )
+    monkeypatch.setattr(api.deps, "build_screen", lambda _: screen)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        async with app.router.lifespan_context(app):
+            # Startup finished while the load is still waiting on Ollama.
+            await asyncio.wait_for(started.wait(), 1)
+            assert not release.is_set()
+            # The lifespan's logging setup stops propagation, so capture here.
+            screen_log = logging.getLogger("harnessd.screen")
+            screen_log.addHandler(caplog.handler)
+            release.set()
+            for _ in range(100):
+                if caplog.records:
+                    break
+                await asyncio.sleep(0.01)
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+                assert (await c.get("/health")).status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+        logging.getLogger("harnessd.screen").removeHandler(caplog.handler)
+
+    [request] = requests
+    body = json.loads(request.content)
+    assert (body["model"], body["keep_alive"]) == ("nimble", -1)
+    assert request.extensions["timeout"]["read"] == PRELOAD_TIMEOUT_SECONDS
+    # Counted by event: the record can reach caplog twice, through the handler
+    # added above and by propagation, depending on earlier tests' logging setup.
+    logged = {
+        (r.levelno, r.getMessage().split()[0])
+        for r in caplog.records
+        if r.name == "harnessd.screen"
+    }
+    assert logged == {(logging.WARNING, "screen.preload_failed")}
+
+    # Nothing to load for the other kinds; a scripted chat model with no replies
+    # would fail if it were asked anything.
+    await preload(None)
+    await preload(ChatScreen(ScriptedChatModel(replies=[])))

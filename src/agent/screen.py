@@ -1,11 +1,13 @@
-"""The injection screen: how likely it is that text holds instructions aimed at an
-AI agent (SPEC-0012 B-0005).
+"""The injection screen: how likely it is that text tries to direct an AI agent
+that reads it (SPEC-0012 B-0005).
 
 A `Screen` raises on any failure, including invalid output and timeouts; the
-caller decides what a failure means (B-0006). Nothing here retries.
+caller decides what a failure means (B-0006). Nothing here retries. `preload`
+loads a System One model ahead of the first screened result (B-0017).
 """
 
 import asyncio
+import logging
 from typing import Protocol
 
 import httpx
@@ -13,6 +15,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.llm import build_chat_model
+from logs import event, get_logger
 from prompts import INJECTION_SCREEN_CHAT_PROMPT, INJECTION_SCREEN_PROMPT
 from schemas import (
     ChatScreenReply,
@@ -26,6 +29,10 @@ from settings import Settings
 # A warm screen answers in seconds. Not a setting: it only has to stay well under
 # RUN_TIMEOUT_SECONDS.
 TIMEOUT_SECONDS = 20.0
+# A cold load of nimble takes one to two minutes.
+PRELOAD_TIMEOUT_SECONDS = 300.0
+
+log = get_logger("screen")
 
 
 class Screen(Protocol):
@@ -51,6 +58,13 @@ class SystemOneScreen:
         self._transport = transport
 
     async def probability(self, text: str) -> float:
+        return await self._ask(text, self._timeout)
+
+    async def preload(self) -> None:
+        """Load the model, waiting as long as a cold load takes."""
+        await self._ask("ready", PRELOAD_TIMEOUT_SECONDS)
+
+    async def _ask(self, text: str, timeout: float) -> float:
         question = SystemOneQuestion(instructions=INJECTION_SCREEN_PROMPT)
         request = SystemOneRequest(
             model=self._model,
@@ -58,7 +72,7 @@ class SystemOneScreen:
             questions=SystemOneQuestions(injection=question),
         )
         async with httpx.AsyncClient(
-            transport=self._transport, timeout=self._timeout
+            transport=self._transport, timeout=timeout
         ) as client:
             response = await client.post(self._url, json=request.model_dump())
         response.raise_for_status()
@@ -81,6 +95,17 @@ class ChatScreen:
         async with asyncio.timeout(self._timeout):
             reply = await self._model.ainvoke(messages)
         return ChatScreenReply.model_validate_json(str(reply.text)).probability
+
+
+async def preload(screen: Screen | None) -> None:
+    """Load a System One screen's model (B-0017). Other screens need no load. A
+    failure is logged, never raised: B-0006 covers calls made before it is ready."""
+    if not isinstance(screen, SystemOneScreen):
+        return
+    try:
+        await screen.preload()
+    except Exception as exc:
+        event(log, logging.WARNING, "screen.preload_failed", error=type(exc).__name__)
 
 
 def build_screen(settings: Settings) -> Screen | None:

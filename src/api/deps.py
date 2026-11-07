@@ -21,7 +21,7 @@ from agent.persistence import (
     open_checkpointer,
 )
 from agent.runner import AgentRunner
-from agent.screen import build_screen
+from agent.screen import Screen, build_screen
 from agent.threads import ThreadService
 from logs import get_logger
 from settings import Settings, get_settings
@@ -46,6 +46,8 @@ class Services:
         self._redis: Redis | None = None
         self._model: BaseChatModel | None = None
         self._graph: AgentGraph | None = None
+        self._screen: Screen | None = None
+        self._screen_built = False
 
     def redis(self, settings: Settings) -> Redis:
         if self._redis is None:
@@ -56,6 +58,13 @@ class Services:
         if self._model is None:
             self._model = build_chat_model(settings)
         return self._model
+
+    def screen(self, settings: Settings) -> Screen | None:
+        """The injection screen, or None when it is off (SPEC-0012 B-0005)."""
+        if not self._screen_built:
+            self._screen = build_screen(settings)
+            self._screen_built = True
+        return self._screen
 
     async def graph(self, settings: Settings) -> AgentGraph:
         async with self._lock:
@@ -68,7 +77,7 @@ class Services:
                     ToolContext(settings=settings),
                     TOOLS,
                     saver,
-                    screen=build_screen(settings),
+                    screen=self.screen(settings),
                 )
             return self._graph
 

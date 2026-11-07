@@ -527,7 +527,8 @@ class SystemOneRequest(_Model):
     model: str
     state: str = Field(min_length=1)
     questions: SystemOneQuestions
-    keep_alive: str = "5m"
+    # Always loaded: nimble is used outside this app too (SPEC-0012 B-0017).
+    keep_alive: int = -1
 
 
 class SystemOneAnswer(_Model):
