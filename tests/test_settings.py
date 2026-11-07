@@ -9,9 +9,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from pydantic import ValidationError
 
-from agent.llm import build_chat_model
+from agent.llm import OPENAI_BASE_URL, build_chat_model
 from settings import Settings, get_settings
 
 
@@ -27,6 +28,9 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LLM_MODEL",
         "ANTHROPIC_API_KEY",
         "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_API_BASE",
+        "OPENAI_BASE_URL",
         "LLM_REQUESTS_PER_MINUTE",
         "RUN_TIMEOUT_SECONDS",
         "CHECKPOINT_TTL_HOURS",
@@ -52,16 +56,33 @@ PROVIDERS: list[tuple[dict[str, Any], type[BaseChatModel]]] = [
         },
         ChatGoogleGenerativeAI,
     ),
+    (
+        {
+            "llm_provider": "openai",
+            "llm_model": "test-model",
+            "openai_api_key": "test-key",
+        },
+        ChatOpenAI,
+    ),
 ]
 
 
 @pytest.mark.spec("SPEC-0001", "B-0001", "AT-0001")
 @pytest.mark.parametrize(("values", "expected"), PROVIDERS)
 def test_provider_selection(
-    values: dict[str, Any], expected: type[BaseChatModel]
+    values: dict[str, Any],
+    expected: type[BaseChatModel],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Neither variable may move the OpenAI model off OpenAI's API.
+    monkeypatch.setenv("OPENAI_API_BASE", "https://elsewhere.example/v1")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://elsewhere.example/v1")
     model = build_chat_model(_settings(**values))
     assert isinstance(model, expected)
+    if isinstance(model, ChatOpenAI):
+        assert model.openai_api_base == OPENAI_BASE_URL
+        assert str(model.root_client.base_url).rstrip("/") == OPENAI_BASE_URL
+        assert str(model.root_async_client.base_url).rstrip("/") == OPENAI_BASE_URL
 
 
 @pytest.mark.spec("SPEC-0001", "B-0008", "AT-0011")
@@ -77,7 +98,7 @@ def test_provider_rate_limit(values: dict[str, Any]) -> None:
 
 
 @pytest.mark.spec("SPEC-0001", "B-0001")
-@pytest.mark.parametrize("provider", ["anthropic", "google"])
+@pytest.mark.parametrize("provider", ["anthropic", "google", "openai"])
 def test_hosted_provider_requires_key(provider: str) -> None:
     with pytest.raises(ValidationError, match="API_KEY is required"):
         _settings(llm_provider=provider, llm_model="m")
@@ -94,7 +115,7 @@ def test_empty_key_counts_as_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.spec("SPEC-0001", "B-0001")
 def test_unknown_provider_rejected() -> None:
     with pytest.raises(ValidationError):
-        _settings(llm_provider="openai")
+        _settings(llm_provider="mistral")
 
 
 @pytest.mark.spec("SPEC-0001", "B-0006")
