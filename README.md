@@ -108,6 +108,7 @@ Pick one provider in `.env`:
 | Ollama (local, default) | `LLM_PROVIDER=ollama`, `LLM_MODEL=llama3.1`, `OLLAMA_BASE_URL=http://localhost:11434` |
 | Anthropic | `LLM_PROVIDER=anthropic`, `LLM_MODEL=claude-sonnet-5-5`, `ANTHROPIC_API_KEY=...` |
 | Google Gemini | `LLM_PROVIDER=google`, `LLM_MODEL=gemini-3.5-flash-lite`, `GOOGLE_API_KEY=...` |
+| OpenAI | `LLM_PROVIDER=openai`, `LLM_MODEL=<model>`, `OPENAI_API_KEY=...` |
 
 For Ollama:
 - If not yet pulled, pull the model first (`ollama pull <model_name>`). It must support tool calls.
