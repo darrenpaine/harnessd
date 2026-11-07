@@ -1,6 +1,6 @@
 # SPEC-0001: Agent core
 
-Status: draft
+Status: reviewed
 Requirements: R-0007, R-0008, R-0025
 Design: [design.md](../design/design.md)
 

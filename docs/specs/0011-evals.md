@@ -1,6 +1,6 @@
 # SPEC-0011: Evals
 
-Status: draft
+Status: reviewed
 Requirements: R-0015
 Design: [design.md](../design/design.md)
 
