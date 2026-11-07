@@ -1,6 +1,6 @@
 # SPEC-0008: Logging
 
-Status: draft
+Status: reviewed
 Requirements: R-0012
 Design: [design.md](../design/design.md)
 
