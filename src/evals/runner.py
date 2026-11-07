@@ -109,7 +109,8 @@ async def run_cases(
     git: tuple[str, bool] = ("unknown", False),
     progress: Callable[[str], None] | None = None,
 ) -> RunRecord:
-    """Run every case `repeats` times and score the run (B-0003)."""
+    """Run every case `repeats` times and score the run (B-0003). A run with the
+    injection screen on is partial, as the dataset assumes it is off (B-0009)."""
     started_at = datetime.now(UTC)
     results = []
     latencies: list[int] = []
@@ -130,7 +131,13 @@ async def run_cases(
         provider=settings.llm_provider,
         model=settings.llm_model,
         repeats=repeats,
-        partial=partial,
+        partial=partial or settings.injection_screen != "off",
+        injection_screen=settings.injection_screen,
+        injection_screen_model=(
+            None
+            if settings.injection_screen == "off"
+            else settings.injection_screen_model
+        ),
         cases=results,
         totals=totals(cases, results, latencies),
     )
