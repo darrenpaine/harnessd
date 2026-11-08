@@ -389,6 +389,7 @@
           "code": {
             "enum": [
               "model_output_invalid",
+              "budget_exceeded",
               "internal"
             ],
             "title": "Code",
