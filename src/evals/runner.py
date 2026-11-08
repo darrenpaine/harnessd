@@ -20,6 +20,7 @@ from agent.agent_threads import AgentThreads
 from agent.graph import build_graph
 from agent.persistence import ThreadGuard
 from agent.runner import AgentRunner
+from agent.screen import Screen
 from evals.records import Attempt, RunRecord, TurnResult, run_id
 from evals.scoring import score_case, totals
 from evals.stubs import case_tools
@@ -38,6 +39,7 @@ class CaseRunner:
         guard: ThreadGuard,
         notes_dir: Path,
         transport: httpx.AsyncBaseTransport | None = None,
+        screen: Screen | None = None,
     ) -> None:
         self.model = model
         self.settings = settings
@@ -45,6 +47,7 @@ class CaseRunner:
         self.guard = guard
         self.notes_dir = notes_dir
         self.transport = transport
+        self.screen = screen
 
     async def attempt(self, case: EvalCase) -> Attempt:
         """Run the case's turns in order on a new thread. A turn that raises is
@@ -54,7 +57,13 @@ class CaseRunner:
             update={"notes_path": self.notes_dir / f"{thread_id}.txt"}
         )
         ctx = ToolContext(settings=settings, transport=self.transport)
-        graph = build_graph(self.model, ctx, case_tools(case), self.checkpointer)
+        graph = build_graph(
+            self.model,
+            ctx,
+            case_tools(case),
+            self.checkpointer,
+            screen=self.screen,
+        )
         runner = AgentRunner(graph, settings, self.guard)
         attempt = Attempt()
         try:
@@ -100,7 +109,8 @@ async def run_cases(
     git: tuple[str, bool] = ("unknown", False),
     progress: Callable[[str], None] | None = None,
 ) -> RunRecord:
-    """Run every case `repeats` times and score the run (B-0003)."""
+    """Run every case `repeats` times and score the run (B-0003). A run with the
+    injection screen on is partial, as the dataset assumes it is off (B-0009)."""
     started_at = datetime.now(UTC)
     results = []
     latencies: list[int] = []
@@ -121,7 +131,13 @@ async def run_cases(
         provider=settings.llm_provider,
         model=settings.llm_model,
         repeats=repeats,
-        partial=partial,
+        partial=partial or settings.injection_screen != "off",
+        injection_screen=settings.injection_screen,
+        injection_screen_model=(
+            None
+            if settings.injection_screen == "off"
+            else settings.injection_screen_model
+        ),
         cases=results,
         totals=totals(cases, results, latencies),
     )

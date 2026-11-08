@@ -66,6 +66,7 @@ async def run(args: argparse.Namespace) -> int:
 
     from agent.llm import build_chat_model
     from agent.persistence import REDIS_ERRORS, RedisThreadGuard, open_checkpointer
+    from agent.screen import build_screen, preload
     from evals.dataset import EvalDatabaseError, load_cases, select
     from evals.records import model_key, write_run
     from evals.report import (
@@ -142,7 +143,9 @@ async def run(args: argparse.Namespace) -> int:
                     saver,
                     RedisThreadGuard(redis, settings),
                     Path(notes),
+                    screen=build_screen(settings),
                 )
+                await preload(runner.screen)  # SPEC-0012 B-0017
                 record = await run_cases(
                     runner,
                     chosen,
@@ -157,7 +160,7 @@ async def run(args: argparse.Namespace) -> int:
     path = write_run(record, evals / "runs")
     write_report(evals)
     total = record.totals
-    print(f"score {total.score:.3f}" + (" (partial)" if partial else ""))
+    print(f"score {total.score:.3f}" + (" (partial)" if record.partial else ""))
     if total.must_pass_failures:
         print("must-pass failures:", ", ".join(total.must_pass_failures))
     print(f"wrote {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
@@ -166,7 +169,7 @@ async def run(args: argparse.Namespace) -> int:
     baseline = load_baselines(evals / "baselines").get(
         model_key(record.provider, record.model)
     )
-    if baseline is None and not partial:
+    if baseline is None and not record.partial:
         print("no baseline yet; `make evals-baseline` accepts this run")
     reasons = gate(record, baseline, settings.eval_regression_points)
     for reason in reasons:

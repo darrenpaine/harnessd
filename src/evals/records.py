@@ -73,6 +73,9 @@ class RunRecord(BaseModel):
     judge_model: str | None = None
     repeats: int
     partial: bool
+    # SPEC-0011 B-0009: older run files have neither, and ran with the screen off.
+    injection_screen: str = "off"
+    injection_screen_model: str | None = None
     cases: list[CaseResult]
     totals: RunTotals
 

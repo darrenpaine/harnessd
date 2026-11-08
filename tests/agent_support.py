@@ -17,6 +17,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from agent.graph import build_graph
 from agent.persistence import ThreadBusyError, ThreadGuard
 from agent.runner import AgentRunner
+from agent.screen import Screen
 from fakes import ScriptedChatModel
 from schemas import AgentRequest, AgentResponse
 from settings import LogLevel
@@ -97,13 +98,18 @@ class Agent:
         checkpointer: BaseCheckpointSaver[Any] | None = None,
         guard: ThreadGuard | None = None,
         serve: Callable[[httpx.Request], httpx.Response] | None = None,
+        screen: Screen | None = None,
     ) -> None:
         self.fetched: list[str] = []
         self._custom = serve
         self.model = ScriptedChatModel(replies=replies, delay=delay)
         self.ctx = dataclasses.replace(ctx, transport=httpx.MockTransport(self._serve))
         self.graph = build_graph(
-            self.model, self.ctx, TOOLS, checkpointer or InMemorySaver()
+            self.model,
+            self.ctx,
+            TOOLS,
+            checkpointer or InMemorySaver(),
+            screen=screen,
         )
         self.guard = guard or LocalThreadGuard()
         self.runner = AgentRunner(self.graph, ctx.settings, self.guard)

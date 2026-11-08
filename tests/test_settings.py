@@ -173,3 +173,38 @@ def test_tracing_settings_validated() -> None:
         _settings(tracing_enabled=True, langfuse_public_key="pk")
     _settings(tracing_enabled=True, langfuse_public_key="pk", langfuse_secret_key="sk")
     _settings(tracing_enabled=True, otel_exporter_otlp_endpoint="http://otel:4318")
+
+
+@pytest.mark.spec("SPEC-0012", "B-0005", "B-0006")
+def test_injection_screen_defaults_off() -> None:
+    settings = _settings()
+
+    assert settings.injection_screen == "off"
+    assert settings.injection_screen_model is None
+    assert settings.injection_threshold == 0.8
+    assert settings.injection_screen_on_error == "withhold"
+
+
+@pytest.mark.spec("SPEC-0012", "B-0005")
+@pytest.mark.parametrize("kind", ["ollama-systemone", "chat"])
+def test_injection_screen_needs_model(kind: str) -> None:
+    with pytest.raises(ValidationError, match="INJECTION_SCREEN_MODEL"):
+        _settings(injection_screen=kind)
+
+    assert _settings(injection_screen=kind, injection_screen_model="m")
+
+
+@pytest.mark.spec("SPEC-0012", "B-0005", "B-0006")
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"injection_screen": "on"},
+        {"injection_threshold": 1.5},
+        {"injection_threshold": -0.1},
+        {"injection_screen_on_error": "ignore"},
+    ],
+    ids=["kind", "threshold-high", "threshold-low", "on-error"],
+)
+def test_injection_settings_validated(values: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        _settings(**values)
