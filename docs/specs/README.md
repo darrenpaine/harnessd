@@ -16,5 +16,5 @@ SPEC-0006.
 | SPEC-0009 | Thread management | implemented | [0009-thread-management.md](0009-thread-management.md) |
 | SPEC-0010 | Observability | implemented | [0010-observability.md](0010-observability.md) |
 | SPEC-0011 | Evals | reviewed | [0011-evals.md](0011-evals.md) |
-| SPEC-0012 | Guardrails and human oversight | reviewed | [0012-guardrails.md](0012-guardrails.md) |
+| SPEC-0012 | Guardrails and human oversight | draft | [0012-guardrails.md](0012-guardrails.md) |
 | SPEC-0013 | Deployment | reviewed | [0013-deployment.md](0013-deployment.md) |
