@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     injection_screen_model: str | None = None
     injection_threshold: float = Field(default=0.8, ge=0, le=1)
     injection_screen_on_error: InjectionScreenOnError = "withhold"
+    # Token budgets (SPEC-0012 B-0009, B-0014)
+    max_tokens_per_run: int = Field(default=50_000, gt=0)
+    max_tokens_per_thread: int = Field(default=200_000, gt=0)
 
     # Runtime
     redis_url: str = "redis://localhost:6379"
@@ -82,6 +85,15 @@ class Settings(BaseSettings):
         if self.injection_screen != "off" and self.injection_screen_model is None:
             raise ValueError(
                 "INJECTION_SCREEN_MODEL is required when INJECTION_SCREEN is on"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _run_budget_fits_thread(self) -> Self:
+        """SPEC-0012: a run can never use more than its thread may."""
+        if self.max_tokens_per_run > self.max_tokens_per_thread:
+            raise ValueError(
+                "MAX_TOKENS_PER_RUN must not be larger than MAX_TOKENS_PER_THREAD"
             )
         return self
 
