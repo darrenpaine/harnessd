@@ -20,7 +20,7 @@ calling up to three tools, and every response is a validated, structured
 resumed after a human confirms a side effect.
 
 Constraints:
-- **Provider-agnostic model**: Ollama locally, Anthropic Claude or Google Gemini
+- **Provider-agnostic model**: Ollama locally, Anthropic Claude, Google Gemini or OpenAI
   hosted, chosen by settings with no code change (SPEC-0001 B-0001).
 - **Typed boundaries**: Pydantic v2 models for the API and for every tool's input
   and output; unknown fields are rejected.
@@ -53,7 +53,7 @@ flowchart LR
     agent_threads --> graph_node[LangGraph agent<br/>src/agent/graph.py]
     graph_node <-->|checkpoints| redis
     graph_node --> llm[Chat model<br/>src/agent/llm.py]
-    llm -.-> providers[Ollama / Claude / Gemini]
+    llm -.-> providers[Ollama / Claude / Gemini / OpenAI]
     graph_node -->|call_tool| tools[Tools<br/>src/tools/]
     tools -.-> tavily[Tavily API]
     tools -.-> web[Public web pages]
@@ -76,7 +76,7 @@ yet written.
 | `src/api/errors.py` | Exception handlers: `ThreadBusyError`, `ThreadAwaitingConfirmationError` and `ThreadRunUnfinishedError` → 409, `ThreadNotFoundError` → 404, `SummaryError` → 500, Redis/LLM connection errors and provider refusals → 503, anything else → 500 via `InternalErrorMiddleware`. `error_responses()` documents a route's error codes. | SPEC-0002, SPEC-0007 B-0004, SPEC-0008 B-0005 | built |
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState, AgentThreadState (a thread's status, pending action, messages and summary as `AgentThreads` reports it) and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key, or if the injection screen is on with no `INJECTION_SCREEN_MODEL`. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004, SPEC-0012 B-0005, B-0006 | built |
-| `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic or ChatGoogleGenerativeAI from settings, no network calls. With `LLM_REQUESTS_PER_MINUTE` set, each model gets its own `InMemoryRateLimiter` (evenly spaced calls, no burst), so calls wait instead of hitting a provider quota. | SPEC-0001 B-0001, B-0008 | built |
+| `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic, ChatGoogleGenerativeAI or ChatOpenAI from settings, no network calls. ChatOpenAI's base URL is pinned to OpenAI's API, so environment variables can't redirect it. With `LLM_REQUESTS_PER_MINUTE` set, each model gets its own `InMemoryRateLimiter` (evenly spaced calls, no burst), so calls wait instead of hitting a provider quota. | SPEC-0001 B-0001, B-0008 | built |
 | `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL; `ShallowRedisSaver` loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
 | `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver), `ToolFailure`, `call_tool()`. | SPEC-0003 B-0001..B-0003 | built |
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. web_search cuts snippets to 500 chars; fetch_site's text leaves out comments, scripts and styles, and elements hidden by the `hidden` attribute, `aria-hidden` or an inline `display:none` / `visibility:hidden`. | SPEC-0003 B-0005..B-0007, SPEC-0012 B-0001, B-0016 | built |
@@ -246,7 +246,7 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 | `refresh_on_read` TTL option | No extra code | Measured: earlier runs' keys keep their old countdown | Doesn't meet SPEC-0004 B-0003 |
 | Global B/AT ids across specs | Fewer test edits when splitting | Gaps in every spec's numbering | Per-spec ids, always written with the spec id |
 | Mock the checkpointer in tests | No Redis needed | Misses real TTL, lock and index behavior | Real Redis via fixture; graph tests use `InMemorySaver` |
-| LangChain `init_chat_model` | One call for any provider | Needs the `langchain` package | A small factory over the three provider packages |
+| LangChain `init_chat_model` | One call for any provider | Needs the `langchain` package | A small factory over the four provider packages |
 | Hand-written Tavily fake | Simple | Skips the real client's request/response handling | Real client on an `httpx.MockTransport` |
 | `DOCS_ENABLED` setting | Can hide docs | Extra config for a non-production service | Docs always on |
 | Set OTel's global tracer provider at startup | The usual OTel setup | Can be set once per process, and FastAPI's middleware fetches its tracer once, so tests couldn't switch tracing on and off | A switching provider that delegates each span to the configured one |
@@ -279,7 +279,8 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 - **Detecting an unreachable dependency** relies on exception types: Redis
   `ConnectionError`/`TimeoutError` (also when wrapped by redisvl's
   `RedisSearchError`), `httpx.TransportError` (Ollama, Gemini) and LangChain's
-  `ModelConnectionError` (Anthropic). A provider that raises something else gives a
+  `ModelConnectionError` (Anthropic; also OpenAI, which `langchain-openai` wraps in
+  LangChain's error types). A provider that raises something else gives a
   500 instead of a 503.
 - **Span parents in graph nodes**: OpenInference doesn't make its node spans current
   in the OTel context, so `agent.tool` and `agent.confirm` find their parent with

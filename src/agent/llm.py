@@ -5,9 +5,14 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.rate_limiters import BaseRateLimiter, InMemoryRateLimiter
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from settings import Settings
+
+# B-0001: always OpenAI's own API. Passed explicitly, so OPENAI_API_BASE and
+# OPENAI_BASE_URL in the environment can't send calls and the key elsewhere.
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
 def _require(key: SecretStr | None, name: str) -> SecretStr:
@@ -51,5 +56,12 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
             return ChatGoogleGenerativeAI(
                 model=settings.llm_model,
                 google_api_key=_require(settings.google_api_key, "GOOGLE_API_KEY"),
+                rate_limiter=rate_limiter,
+            )
+        case "openai":
+            return ChatOpenAI(
+                model=settings.llm_model,
+                api_key=_require(settings.openai_api_key, "OPENAI_API_KEY"),
+                base_url=OPENAI_BASE_URL,
                 rate_limiter=rate_limiter,
             )

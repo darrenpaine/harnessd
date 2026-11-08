@@ -22,6 +22,7 @@ from tracing import Tracing, configure_tracing
 SECRET_ENV_VARS = (
     "ANTHROPIC_API_KEY",
     "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
     "TAVILY_API_KEY",
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",

@@ -7,7 +7,7 @@ from typing import Literal, Self
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLMProvider = Literal["ollama", "anthropic", "google"]
+LLMProvider = Literal["ollama", "anthropic", "google", "openai"]
 LogLevel = Literal["debug", "info", "warning", "error"]
 LogFormat = Literal["text", "json"]
 InjectionScreen = Literal["off", "ollama-systemone", "chat"]
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
     llm_requests_per_minute: int | None = Field(default=None, ge=1)  # B-0008
 
     # Tools
@@ -71,6 +72,8 @@ class Settings(BaseSettings):
             )
         if self.llm_provider == "google" and self.google_api_key is None:
             raise ValueError("GOOGLE_API_KEY is required when LLM_PROVIDER=google")
+        if self.llm_provider == "openai" and self.openai_api_key is None:
+            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
         return self
 
     @model_validator(mode="after")
