@@ -3,6 +3,7 @@
 No test calls a real model: cases run on the scripted fake (SPEC-0005).
 """
 
+import dataclasses
 import json
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -195,6 +196,37 @@ async def test_stub_tools(tool_context: ToolContext, tmp_path: Path) -> None:
     assert isinstance(model, ScriptedChatModel)
     results = [m for m in model.calls[1] if isinstance(m, ToolMessage)]
     assert json.loads(str(results[0].content)) == canned.model_dump(mode="json")
+
+
+@pytest.mark.spec("SPEC-0012", "B-0005")
+async def test_case_runner_screens_stubs(
+    tool_context: ToolContext, tmp_path: Path
+) -> None:
+    class Flagging:
+        async def probability(self, text: str) -> float:
+            return 0.9
+
+    stub_case = case(
+        tool_outputs={
+            "fetch_site": {"url": "https://x.example/", "text": "S", "truncated": False}
+        },
+    )
+    replies = [tool_turn(fetch("page")), AIMessage(content="done")]
+    case_runner = CaseRunner(
+        ScriptedChatModel(replies=replies),
+        tool_context.settings,
+        InMemorySaver(),
+        LocalThreadGuard(),
+        tmp_path / "eval-notes",
+        screen=Flagging(),
+    )
+
+    attempt = await case_runner.attempt(stub_case)
+
+    [turn] = attempt.turns
+    assert turn.response is not None
+    [record] = turn.response.tool_calls
+    assert record.error is not None and record.error.code == "rejected"
 
 
 @pytest.mark.spec("SPEC-0011", "B-0002")
@@ -587,3 +619,42 @@ def test_committed_evals_consistent() -> None:
     assert (evals / "REPORT.md").read_text(encoding="utf-8") == report_for(evals), (
         "evals/REPORT.md is out of date; run `make evals-report`"
     )
+
+
+@pytest.mark.spec("SPEC-0011", "B-0009", "AT-0010")
+async def test_screen_run_is_partial(tool_context: ToolContext, tmp_path: Path) -> None:
+    settings = tool_context.settings.model_copy(
+        update={
+            "injection_screen": "ollama-systemone",
+            "injection_screen_model": "nimble",
+        }
+    )
+    ctx = dataclasses.replace(tool_context, settings=settings)
+    failing = case(id="EV-0002", must_pass=True, expect={"status": "error"})
+    case_runner = runner(ctx, tmp_path, [AIMessage(content="hi")])
+
+    record = await run_cases(case_runner, [failing], 1, partial=False)
+
+    assert record.partial
+    assert (record.injection_screen, record.injection_screen_model) == (
+        "ollama-systemone",
+        "nimble",
+    )
+    # Never compared, so a must_pass failure passes the gate; never a baseline.
+    assert record.totals.must_pass_failures == ["EV-0002"]
+    assert gate(record, Baseline(run_id="base", score=1.0), 5) == []
+    assert accept_baseline([record], "ollama", "llama3.1", tmp_path) is None
+
+    # A run file from before B-0009 ran with the screen off.
+    old = run_record(1.0).model_dump(
+        exclude={"injection_screen", "injection_screen_model"}
+    )
+    loaded = RunRecord.model_validate(old)
+    assert (loaded.injection_screen, loaded.injection_screen_model) == ("off", None)
+    plain = await run_cases(
+        runner(tool_context, tmp_path, [AIMessage(content="hi")]),
+        [failing],
+        1,
+        partial=False,
+    )
+    assert not plain.partial and plain.injection_screen_model is None

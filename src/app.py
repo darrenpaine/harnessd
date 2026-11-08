@@ -1,13 +1,15 @@
 """The FastAPI app: metadata, lifespan, routers and error handling (SPEC-0002,
 SPEC-0007). Routes live in `api/`."""
 
+import asyncio
 import tomllib
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
 
+from agent.screen import preload
 from api import agent, health, threads
 from api.deps import Services, app_settings
 from api.errors import add_error_handlers
@@ -46,9 +48,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = app_settings(app)
     configure_logging(settings)
     tracing = configure_tracing(settings)
-    app.state.services = Services()
+    services = Services()
+    app.state.services = services
+    # SPEC-0012 B-0017: load the screen's model without holding up startup.
+    loading = asyncio.create_task(preload(services.screen(settings)))
     yield
-    await app.state.services.aclose()
+    loading.cancel()
+    with suppress(asyncio.CancelledError):
+        await loading
+    await services.aclose()
     tracing.shutdown()
 
 

@@ -10,6 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 LLMProvider = Literal["ollama", "anthropic", "google"]
 LogLevel = Literal["debug", "info", "warning", "error"]
 LogFormat = Literal["text", "json"]
+InjectionScreen = Literal["off", "ollama-systemone", "chat"]
+InjectionScreenOnError = Literal["withhold", "allow"]
 
 
 class Settings(BaseSettings):
@@ -28,6 +30,12 @@ class Settings(BaseSettings):
     # Tools
     tavily_api_key: SecretStr | None = None
     notes_path: Path = Path("data/notes.txt")
+
+    # Guardrails (SPEC-0012 B-0005, B-0006)
+    injection_screen: InjectionScreen = "off"
+    injection_screen_model: str | None = None
+    injection_threshold: float = Field(default=0.8, ge=0, le=1)
+    injection_screen_on_error: InjectionScreenOnError = "withhold"
 
     # Runtime
     redis_url: str = "redis://localhost:6379"
@@ -63,6 +71,15 @@ class Settings(BaseSettings):
             )
         if self.llm_provider == "google" and self.google_api_key is None:
             raise ValueError("GOOGLE_API_KEY is required when LLM_PROVIDER=google")
+        return self
+
+    @model_validator(mode="after")
+    def _screen_model_set(self) -> Self:
+        """SPEC-0012: a screen that is on needs a model to ask."""
+        if self.injection_screen != "off" and self.injection_screen_model is None:
+            raise ValueError(
+                "INJECTION_SCREEN_MODEL is required when INJECTION_SCREEN is on"
+            )
         return self
 
     @model_validator(mode="after")

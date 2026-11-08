@@ -17,3 +17,5 @@ def load(name: str) -> str:
 
 SYSTEM_PROMPT = load("system")
 SUMMARY_PROMPT = load("summary")
+INJECTION_SCREEN_PROMPT = load("injection_screen")
+INJECTION_SCREEN_CHAT_PROMPT = load("injection_screen_chat")

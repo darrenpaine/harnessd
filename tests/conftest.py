@@ -27,8 +27,16 @@ SECRET_ENV_VARS = (
     "LANGFUSE_SECRET_KEY",
     "OTEL_EXPORTER_OTLP_HEADERS",
 )
-# Local settings that would change what tests see (SPEC-0010).
-LOCAL_ENV_VARS = ("TRACING_ENABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "LOG_FORMAT")
+# Local settings that would change what tests see (SPEC-0010, SPEC-0012).
+LOCAL_ENV_VARS = (
+    "TRACING_ENABLED",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "LOG_FORMAT",
+    "INJECTION_SCREEN",
+    "INJECTION_SCREEN_MODEL",
+    "INJECTION_THRESHOLD",
+    "INJECTION_SCREEN_ON_ERROR",
+)
 
 
 @pytest.fixture(autouse=True)

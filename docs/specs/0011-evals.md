@@ -128,6 +128,7 @@ Checks on several turns of one thread:
 
 ### Run file
 `{run_id, started_at, git_sha, dirty, provider, model, judge_model, repeats,
+  partial, injection_screen, injection_screen_model,
   cases: [{id, score, passed, must_pass, failures, judge_score?, tool_calls,
   latency_ms, input_tokens?, output_tokens?}], totals: {score, by_tag, must_pass_failures,
   latency_p50_ms, latency_p95_ms, tokens}}`
@@ -136,7 +137,8 @@ Checks on several turns of one thread:
 - `make evals` — run all cases against the `.env` provider, write a run file,
   compare it with the baseline, regenerate `REPORT.md`; exit 1 on a regression.
 - `make evals ARGS="--tag confirmation --repeats 1"` — a subset; subset runs are
-  written but marked `partial` and never compared or used as a baseline.
+  written but marked `partial` and never compared or used as a baseline. The same
+  goes for a run with the injection screen on (B-0009).
 - `make evals-baseline` — accept the latest full run as the model's baseline;
   refused (exit 2) if that run has a must_pass failure.
 
@@ -183,6 +185,10 @@ cases with rate-limit errors.
   as a dataset run.
 - B-0008: CI runs the deterministic parts without a model: the dataset validates,
   the scorers pass their unit tests, and `REPORT.md` matches the run files.
+- B-0009: The run file records `INJECTION_SCREEN` and its model (SPEC-0012 B-0005);
+  a run file without them means `off`. A run with the screen on is marked `partial`
+  whichever cases it holds, because the dataset's expectations assume the screen is
+  off: the injection cases expect the pages a screen withholds.
 
 ## Acceptance tests
 Unit tests use the scripted fake model; none call a real LLM.
@@ -211,6 +217,10 @@ Unit tests use the scripted fake model; none call a real LLM.
 - AT-0009 (B-0007): With tracing on and an in-memory exporter, a case run's spans
   carry `eval.case_id` and `eval.run_id`. The Langfuse dataset-run upload is checked
   by hand against the local stack. -> `tests/test_evals.py::test_case_spans`
+- AT-0010 (B-0009): A full run with the screen on → its run file records the screen
+  and its model and is marked `partial`, and it is neither compared nor accepted as
+  a baseline; a run file without the fields loads as `off`.
+  -> `tests/test_evals.py::test_screen_run_is_partial`
 
 ## Initial dataset (about 20 cases)
 Answer without tools; search then answer; fetch a given URL; a fetch error handled
