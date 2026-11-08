@@ -53,15 +53,17 @@ the agent did and who approved it.
 | `INJECTION_SCREEN_MODEL` | none | Required when the screen is on: e.g. `nimble` for `ollama-systemone`, or a chat model of `LLM_PROVIDER` for `chat`. |
 | `INJECTION_THRESHOLD` | `0.8` | Probability of an injection at or above which the result is withheld. |
 | `INJECTION_SCREEN_ON_ERROR` | `withhold` | `withhold` (fail closed) or `allow` (fail open) when the screen fails. |
-| `MAX_TOKENS_PER_RUN` | `50000` | Input + output tokens across the model calls of one run. |
-| `MAX_TOKENS_PER_THREAD` | `200000` | Tokens across all runs of a thread since its last compaction (SPEC-0009). |
+| `MAX_TOKENS_PER_RUN` | `50000` | Input + output tokens across the model calls of one run. A positive integer, at most `MAX_TOKENS_PER_THREAD`; otherwise a settings error at startup. |
+| `MAX_TOKENS_PER_THREAD` | `200000` | Tokens across all runs of a thread since its last compaction (SPEC-0009). A positive integer. |
 | `DAILY_COST_LIMIT_USD` | none | Total spend per UTC day across all threads; unset → no daily cap. |
 
 ### Model changes (`src/schemas.py`)
 - ErrorCode adds `budget_exceeded`.
 - ApiErrorCode adds `budget_exceeded`, returned with HTTP 429 (SPEC-0002 table gains
   a 429 row).
-- AgentState gains `tokens_used` (thread total, checkpointed).
+- AgentState gains `run_tokens` (reset at the start of every request, like the
+  tool call count) and `thread_tokens` (checkpointed; a thread saved before this
+  change counts from 0).
 
 ### Price table
 `src/agent/prices.py`: USD per million input and output tokens per
@@ -134,17 +136,25 @@ and thread; none carries message text, answers or tool output.
 
 ### Budgets
 - B-0008: Token use is taken from each model reply's usage metadata; when a provider
-  reports none, it is estimated as characters ÷ 4 and marked estimated in the audit
-  event.
+  reports none, it is estimated as characters ÷ 4 (the prompt sent, plus the reply's
+  text and tool call arguments) and marked estimated in the audit event. Until the
+  audit events are built, the `model.reply` log event carries `tokens` and
+  `estimated`.
 - B-0009: When a run's tokens reach `MAX_TOKENS_PER_RUN`, the run makes no further
   model call and ends with status error, code `budget_exceeded`, keeping its
-  tool_calls so far. The thread stays usable (SPEC-0001 B-0007): the next run has a
-  fresh run budget.
+  tool_calls so far. The check runs before each model call. A reply that takes the
+  run over the budget still counts: a final answer is returned as usual, but tool
+  calls it asks for are not run. The thread stays usable (SPEC-0001 B-0007): the next
+  run has a fresh run budget, and so does the request that answers a confirmation.
 - B-0014: When a thread's tokens reach `MAX_TOKENS_PER_THREAD`, the run in progress
   ends as in B-0009, and every later run on the thread ends at once the same way,
   with no model call, until the thread is compacted (SPEC-0009), which resets the
-  count to the summary's size, or deleted. The error message says to compact or
-  delete the thread.
+  count to the summary's size, or deleted. The summary's size is the summary call's
+  output tokens, or its characters ÷ 4 when the provider reports none; the
+  compaction call's own tokens are not added to the thread. Compaction itself is
+  never refused by this budget. The thread count adds every model call's input and
+  output, so it measures what the thread has cost, not its current size. The error
+  message says to compact or delete the thread.
 - B-0010: Spend is added to a Redis counter per UTC day after each model call. When
   `DAILY_COST_LIMIT_USD` is set and reached, new runs and compactions get 429
   `budget_exceeded` before taking the thread lock; a run already in progress

@@ -26,7 +26,7 @@ step, each tool call, and how it ends. Message text and secrets are never logged
 |-------|-------|--------|
 | `run.start` | info | thread, kind (`message` \| `confirm`), max_tool_calls, provider, model |
 | `graph.step` | info | thread, node (`model` \| `tools` \| `confirm`) |
-| `model.reply` | info | thread, tool_calls (count requested), ms |
+| `model.reply` | info | thread, tool_calls (count requested), tokens, estimated (SPEC-0012 B-0008), ms |
 | `tool.call` | info | thread, tool, call_id, result (`ok` or the ToolError code), ms |
 | `tool.input` | debug | thread, tool, call_id, input (JSON, cut to 200 chars) |
 | `confirm.wait` | info | thread, tool |

@@ -118,13 +118,19 @@ class AgentThreads:
         return _TRACE.validate_python(snapshot.values.get("trace", []))
 
     async def replace_history(
-        self, thread_id: UUID, removed: Sequence[BaseMessage], summary: str
+        self,
+        thread_id: UUID,
+        removed: Sequence[BaseMessage],
+        summary: str,
+        summary_tokens: int,
     ) -> None:
         """Remove `removed` from the thread's messages and store `summary` in
-        their place (SPEC-0009 B-0004)."""
+        their place (SPEC-0009 B-0004). The thread's token count restarts at the
+        summary's size (SPEC-0012 B-0014)."""
         update = {
             "messages": [RemoveMessage(id=m.id or "") for m in removed],
             "summary": summary,
+            "thread_tokens": summary_tokens,
         }
         await self.graph.aupdate_state(_config(thread_id), update)
 
@@ -151,7 +157,11 @@ def _config(thread_id: UUID) -> RunnableConfig:
 def _counters(max_tool_calls: int) -> RunCounters:
     """The state reset at the start of every request."""
     return RunCounters(
-        max_tool_calls=max_tool_calls, calls_used=0, trace=[], outcome=None
+        max_tool_calls=max_tool_calls,
+        calls_used=0,
+        run_tokens=0,
+        trace=[],
+        outcome=None,
     )
 
 

@@ -124,7 +124,7 @@ async def test_replace_history(tool_context: ToolContext) -> None:
     before = await agent.state(thread_id)
     assert before is not None
 
-    await agent.replace_history(thread_id, before.messages[:2], "the summary")
+    await agent.replace_history(thread_id, before.messages[:2], "the summary", 7)
 
     after = await agent.state(thread_id)
     assert after is not None

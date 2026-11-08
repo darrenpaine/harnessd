@@ -123,7 +123,7 @@ class PendingAction(_Model):
 
 RunStatus = Literal["ok", "truncated", "error", "awaiting_confirmation"]
 
-ErrorCode = Literal["model_output_invalid", "internal"]
+ErrorCode = Literal["model_output_invalid", "budget_exceeded", "internal"]
 
 
 class ErrorInfo(_Model):

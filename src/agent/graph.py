@@ -22,6 +22,7 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 
+from agent.budgets import call_tokens, over_budget
 from agent.screen import Screen
 from agent.tool_calls import ToolCalls, Tools, tool_message
 from logs import elapsed_ms, event, get_logger
@@ -49,6 +50,7 @@ class RunCounters(TypedDict):
 
     max_tool_calls: int
     calls_used: int
+    run_tokens: int  # SPEC-0012 B-0009
     trace: list[dict[str, Any]]  # ToolCallRecord dumps, in call order
     outcome: Outcome | None
 
@@ -64,6 +66,8 @@ class RunInput(RunCounters):
 
 class AgentState(RunInput):
     summary: NotRequired[str | None]  # written by compaction (SPEC-0009 B-0004)
+    # Tokens since the last compaction (SPEC-0012 B-0014); absent counts as 0.
+    thread_tokens: NotRequired[int]
 
 
 AgentGraph = CompiledStateGraph[AgentState, None, RunInput]
@@ -197,6 +201,10 @@ def model_turn(reply: AIMessage, state: AgentState, calls: ToolCalls) -> Verdict
     return RunCalls(invalid=invalid)
 
 
+def _budget_outcome(message: str) -> Outcome:
+    return Outcome(status="error", code="budget_exceeded", message=message)
+
+
 def _step(node: str) -> None:
     event(log, logging.INFO, "graph.step", node=node)
 
@@ -213,29 +221,59 @@ def build_graph(
     screen, or None when it is off (SPEC-0012 B-0005)."""
     bound = model.bind_tools([tool_schema(tool) for tool in tools.values()])
     calls = ToolCalls(tools, ctx, screen)
+    max_run = ctx.settings.max_tokens_per_run
+    max_thread = ctx.settings.max_tokens_per_thread
 
     async def call_model(state: AgentState) -> Command[str]:
+        """One model turn, unless a token budget is used up (SPEC-0012 B-0009,
+        B-0014). A reply that crosses a budget still counts: its answer is
+        returned, but its tool calls are not run."""
         _step("model")
+        run_tokens = state["run_tokens"]
+        thread_tokens = state.get("thread_tokens", 0)
+        if stop := over_budget(run_tokens, thread_tokens, max_run, max_thread):
+            return Command(update={"outcome": _budget_outcome(stop)}, goto=END)
         started = time.perf_counter()
-        reply = await bound.ainvoke(build_prompt(state))
+        prompt = build_prompt(state)
+        reply = await bound.ainvoke(prompt)
         assert isinstance(reply, AIMessage)
+        tokens = call_tokens(prompt, reply)
+        counts = {
+            "run_tokens": run_tokens + tokens.count,
+            "thread_tokens": thread_tokens + tokens.count,
+        }
         requested = len(reply.tool_calls) + len(reply.invalid_tool_calls)
         event(
             log,
             logging.INFO,
             "model.reply",
             tool_calls=requested,
+            tokens=tokens.count,
+            estimated=tokens.estimated,
             ms=elapsed_ms(started),
         )
         match model_turn(reply, state, calls):
             case Answer():
-                return Command(update={"messages": [reply]}, goto=END)
+                return Command(update={"messages": [reply], **counts}, goto=END)
             case Stop(outcome):
                 return Command(
-                    update={"messages": [reply], "outcome": outcome}, goto=END
+                    update={"messages": [reply], "outcome": outcome, **counts},
+                    goto=END,
                 )
             case RunCalls(invalid):
+                if stop := over_budget(
+                    **counts, max_run=max_run, max_thread=max_thread
+                ):
+                    return Command(
+                        update={
+                            "messages": [reply],
+                            "outcome": _budget_outcome(stop),
+                            **counts,
+                        },
+                        goto=END,
+                    )
                 update: dict[str, Any] = {
+                    **counts,
                     "messages": [reply, *calls.malformed(reply)],
                     "queue": reply.tool_calls,
                     "calls_used": state["calls_used"] + requested,

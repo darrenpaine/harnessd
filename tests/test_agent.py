@@ -177,6 +177,7 @@ def test_build_prompt() -> None:
         summary=None,
         max_tool_calls=5,
         calls_used=0,
+        run_tokens=0,
         trace=[],
         outcome=None,
     )

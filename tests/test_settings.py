@@ -34,6 +34,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LLM_REQUESTS_PER_MINUTE",
         "RUN_TIMEOUT_SECONDS",
         "CHECKPOINT_TTL_HOURS",
+        "MAX_TOKENS_PER_RUN",
+        "MAX_TOKENS_PER_THREAD",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -208,3 +210,19 @@ def test_injection_screen_needs_model(kind: str) -> None:
 def test_injection_settings_validated(values: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         _settings(**values)
+
+
+@pytest.mark.spec("SPEC-0012", "B-0009", "B-0014")
+def test_token_budget_settings() -> None:
+    settings = _settings()
+    assert (settings.max_tokens_per_run, settings.max_tokens_per_thread) == (
+        50_000,
+        200_000,
+    )
+    assert _settings(max_tokens_per_run=10, max_tokens_per_thread=10)
+
+    for values in ({"max_tokens_per_run": 0}, {"max_tokens_per_thread": -1}):
+        with pytest.raises(ValidationError, match="greater than 0"):
+            _settings(**values)
+    with pytest.raises(ValidationError, match="MAX_TOKENS_PER_RUN must not be"):
+        _settings(max_tokens_per_run=11, max_tokens_per_thread=10)
