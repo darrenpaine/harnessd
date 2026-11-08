@@ -21,6 +21,7 @@ from langchain_core.messages import (
 )
 
 from agent.agent_threads import AgentThreads
+from agent.budgets import output_tokens
 from agent.graph import AgentGraph
 from agent.persistence import ThreadGuard
 from logs import elapsed_ms, event, get_logger, log_context
@@ -115,8 +116,10 @@ class ThreadService:
                 summary = state.summary
                 removed = state.messages[: compaction_cut(state.messages, keep_turns)]
                 if removed:
-                    summary = await self._summarise(summary, removed)
-                    await self.threads.replace_history(thread_id, removed, summary)
+                    summary, size = await self._summarise(summary, removed)
+                    await self.threads.replace_history(
+                        thread_id, removed, summary, size
+                    )
                     await self.guard.touch(str(thread_id))
             event(
                 log,
@@ -141,9 +144,10 @@ class ThreadService:
 
     async def _summarise(
         self, previous: str | None, messages: Sequence[BaseMessage]
-    ) -> str:
-        """B-0004, B-0008: one model call under the run timeout. Provider
-        errors propagate for the API to map to 503."""
+    ) -> tuple[str, int]:
+        """B-0004, B-0008: one model call under the run timeout; the summary and
+        its size in tokens (SPEC-0012 B-0014). Provider errors propagate for the
+        API to map to 503."""
         prompt = [
             SystemMessage(content=SUMMARY_PROMPT),
             HumanMessage(content=transcript(previous, messages)),
@@ -159,7 +163,8 @@ class ThreadService:
         if not text:
             _summary_failed("empty")
             raise SummaryError("the model returned an empty summary")
-        return text
+        assert isinstance(reply, AIMessage)
+        return text, output_tokens(reply)
 
 
 def _summary_failed(reason: str) -> None:
