@@ -13,25 +13,25 @@ CHARS_PER_TOKEN = 4
 class Tokens:
     """Tokens one model call used; `estimated` when the provider reported none."""
 
-    count: int
+    input: int
+    output: int
     estimated: bool
+
+    @property
+    def count(self) -> int:
+        return self.input + self.output
 
 
 def call_tokens(prompt: Sequence[BaseMessage], reply: AIMessage) -> Tokens:
-    """Input + output tokens from the reply's usage metadata, or characters ÷ 4
-    over the prompt and the reply when there is none (B-0008)."""
-    if reply.usage_metadata is not None:
-        usage = reply.usage_metadata
-        return Tokens(usage["input_tokens"] + usage["output_tokens"], estimated=False)
-    chars = sum(_chars(message) for message in [*prompt, reply])
-    return Tokens(chars // CHARS_PER_TOKEN, estimated=True)
-
-
-def output_tokens(reply: AIMessage) -> int:
-    """The reply's own size: its output tokens, or its characters ÷ 4 (B-0014)."""
-    if reply.usage_metadata is not None:
-        return reply.usage_metadata["output_tokens"]
-    return _chars(reply) // CHARS_PER_TOKEN
+    """Input and output tokens from the reply's usage metadata, or characters ÷ 4
+    of the prompt and of the reply when there is none (B-0008)."""
+    if (usage := reply.usage_metadata) is not None:
+        return Tokens(usage["input_tokens"], usage["output_tokens"], estimated=False)
+    return Tokens(
+        sum(_chars(message) for message in prompt) // CHARS_PER_TOKEN,
+        _chars(reply) // CHARS_PER_TOKEN,
+        estimated=True,
+    )
 
 
 def _chars(message: BaseMessage) -> int:

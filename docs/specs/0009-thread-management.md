@@ -18,11 +18,11 @@ documented like the other operations (SPEC-0007 B-0003, B-0004) under the tag
 |----------|-------------|---------|--------|
 | `GET /v1/threads/{thread_id}` | `get_thread` | 200 ThreadState | 404, 422, 503 |
 | `DELETE /v1/threads/{thread_id}` | `delete_thread` | 204, no body | 404, 409, 422, 503 |
-| `POST /v1/threads/{thread_id}/compact` | `compact_thread` | 200 CompactResponse | 404, 409, 422, 503, 500 |
+| `POST /v1/threads/{thread_id}/compact` | `compact_thread` | 200 CompactResponse | 404, 409, 422, 429, 503, 500 |
 
 404 and 409 use the ApiError body (SPEC-0002) with codes `thread_not_found`,
 `thread_busy`, `thread_awaiting_confirmation` and `thread_run_unfinished`; all but
-`thread_busy` are new ApiErrorCode values. 503 and 500 are as in SPEC-0002 B-0005, B-0007 and B-0008.
+`thread_busy` are new ApiErrorCode values. 429 `budget_exceeded` is the daily cost limit (SPEC-0012 B-0010). 503 and 500 are as in SPEC-0002 B-0005, B-0007 and B-0008.
 
 ### ThreadState
 - thread_id: UUID

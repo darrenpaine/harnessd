@@ -516,7 +516,7 @@ async def test_services_wire_the_screen(
         async def __aexit__(self, *_: object) -> None:
             return None
 
-    def fake_build(*_: object, screen: Screen | None) -> str:
+    def fake_build(*_: object, screen: Screen | None, **__: object) -> str:
         built["screen"] = screen
         return "graph"
 
@@ -560,7 +560,7 @@ async def test_screen_preload(
         injection_screen_model="nimble",
         notes_path=tmp_path / "notes.txt",
     )
-    monkeypatch.setattr(api.deps, "build_screen", lambda _: screen)
+    monkeypatch.setattr(api.deps, "build_screen", lambda *_: screen)
     app.dependency_overrides[get_settings] = lambda: settings
     try:
         async with app.router.lifespan_context(app):

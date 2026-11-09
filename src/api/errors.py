@@ -24,6 +24,7 @@ from redisvl.exceptions import RedisSearchError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent.persistence import REDIS_ERRORS, ThreadBusyError
+from agent.spend import DailyLimitError
 from agent.threads import (
     SummaryError,
     ThreadAwaitingConfirmationError,
@@ -46,6 +47,9 @@ UNEXPECTED = "An unexpected error."
 UNAVAILABLE = "Redis or the LLM provider is down, or the provider refused the request."
 BUSY = "A run is in progress on the thread."
 NOT_FOUND = "No such thread: unknown, expired or deleted."
+SPENT = (
+    "The daily cost limit is reached; `Retry-After` gives the seconds until 00:00 UTC."
+)
 
 
 def error_responses(descriptions: dict[int, str]) -> dict[int | str, dict[str, Any]]:
@@ -57,10 +61,15 @@ def error_responses(descriptions: dict[int, str]) -> dict[int | str, dict[str, A
     }
 
 
-def api_error(status: int, code: ApiErrorCode, message: str) -> JSONResponse:
+def api_error(
+    status: int,
+    code: ApiErrorCode,
+    message: str,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     tag_error(code)  # SPEC-0010 B-0002
     body = ApiError(error=ApiErrorDetail(code=code, message=message))
-    return JSONResponse(status_code=status, content=body.model_dump())
+    return JSONResponse(status_code=status, content=body.model_dump(), headers=headers)
 
 
 def provider_rejection(exc: Exception, model: str) -> str:
@@ -85,6 +94,17 @@ def provider_rejection(exc: Exception, model: str) -> str:
 async def thread_busy(request: Request, exc: Exception) -> JSONResponse:
     event(log, logging.WARNING, "thread.busy", thread=exc.args[0] if exc.args else None)
     return api_error(409, "thread_busy", "a run is already in progress on this thread")
+
+
+async def daily_limit_reached(request: Request, exc: Exception) -> JSONResponse:
+    """SPEC-0012 B-0010: 429 until 00:00 UTC."""
+    assert isinstance(exc, DailyLimitError)
+    return api_error(
+        429,
+        "budget_exceeded",
+        str(exc),
+        headers={"Retry-After": str(exc.retry_after)},
+    )
 
 
 async def thread_not_found(request: Request, exc: Exception) -> JSONResponse:
@@ -145,6 +165,7 @@ async def provider_rejected(request: Request, exc: Exception) -> JSONResponse:
 
 def add_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ThreadBusyError, thread_busy)
+    app.add_exception_handler(DailyLimitError, daily_limit_reached)
     app.add_exception_handler(ThreadNotFoundError, thread_not_found)
     app.add_exception_handler(
         ThreadAwaitingConfirmationError, thread_awaiting_confirmation

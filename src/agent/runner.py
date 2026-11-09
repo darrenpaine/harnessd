@@ -15,6 +15,7 @@ from opentelemetry.trace import Span, StatusCode
 from agent.agent_threads import AgentThreads, PreparedRun
 from agent.graph import AgentGraph
 from agent.persistence import ThreadGuard
+from agent.spend import DailySpend
 from logs import elapsed_ms, event, get_logger, log_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo
 from settings import Settings
@@ -29,13 +30,15 @@ class AgentRunner:
         graph: AgentGraph,
         settings: Settings,
         guard: ThreadGuard,
+        spend: DailySpend | None = None,
     ) -> None:
         self.threads = AgentThreads(graph)
         self.settings = settings
         self.guard = guard
+        self.spend = spend
 
     async def run(self, request: AgentRequest) -> AgentResponse:
-        """Run a request to its end. Raises ThreadBusyError and
+        """Run a request to its end. Raises DailyLimitError, ThreadBusyError and
         ConfirmationStateError; dependency failures propagate."""
         thread_id = request.thread_id or uuid4()
         with (
@@ -56,6 +59,8 @@ class AgentRunner:
             return response
 
     async def _run(self, request: AgentRequest, thread_id: UUID) -> AgentResponse:
+        if self.spend is not None:  # SPEC-0012 B-0010, before the lock
+            await self.spend.refuse_if_reached()
         async with self.guard.hold(str(thread_id)):
             run = await self._prepare(request, thread_id)
             try:

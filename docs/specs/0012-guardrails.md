@@ -55,7 +55,7 @@ the agent did and who approved it.
 | `INJECTION_SCREEN_ON_ERROR` | `withhold` | `withhold` (fail closed) or `allow` (fail open) when the screen fails. |
 | `MAX_TOKENS_PER_RUN` | `50000` | Input + output tokens across the model calls of one run. A positive integer, at most `MAX_TOKENS_PER_THREAD`; otherwise a settings error at startup. |
 | `MAX_TOKENS_PER_THREAD` | `200000` | Tokens across all runs of a thread since its last compaction (SPEC-0009). A positive integer. |
-| `DAILY_COST_LIMIT_USD` | none | Total spend per UTC day across all threads; unset → no daily cap. |
+| `DAILY_COST_LIMIT_USD` | none | Total spend per UTC day across all threads; unset → no daily cap, nothing counted and no prices needed. Greater than 0 when set. |
 
 ### Model changes (`src/schemas.py`)
 - ErrorCode adds `budget_exceeded`.
@@ -67,7 +67,18 @@ the agent did and who approved it.
 
 ### Price table
 `src/agent/prices.py`: USD per million input and output tokens per
-`(provider, model)`, with the date each price was checked. Ollama models cost 0.
+`(provider, model)`, with the date each price was checked and a link to the
+provider's pricing page. Every Ollama model costs 0 without an entry. Prices are flat:
+cached-input discounts are ignored (spend can only be overstated), reasoning tokens
+are output tokens, and an estimated token count (B-0008) is priced like a reported
+one. A model whose price changes with prompt size is left out until the table
+supports tiers.
+
+| Provider | Model | Input $/M | Output $/M | Checked |
+|----------|-------|-----------|------------|---------|
+| anthropic | `claude-sonnet-5-5` | 2.00 | 10.00 | 2026-11-08 |
+| google | `gemini-3.5-flash-lite` | 0.30 | 2.50 | 2026-11-08 |
+| openai | `gpt-6.1-terra` | 1.00 | 5.00 | 2026-11-08 |
 
 ### Audit events (`harnessd.audit` logger, always at info)
 `audit.run.start`, `audit.run.end` (status, tokens, cost_usd), `audit.tool`
@@ -155,12 +166,22 @@ and thread; none carries message text, answers or tool output.
   never refused by this budget. The thread count adds every model call's input and
   output, so it measures what the thread has cost, not its current size. The error
   message says to compact or delete the thread.
-- B-0010: Spend is added to a Redis counter per UTC day after each model call. When
-  `DAILY_COST_LIMIT_USD` is set and reached, new runs and compactions get 429
-  `budget_exceeded` before taking the thread lock; a run already in progress
-  finishes its current model call and then ends as in B-0009.
-- B-0011: With `DAILY_COST_LIMIT_USD` set, a provider and model missing from the
-  price table is a settings error at startup, so spend is never silently uncounted.
+- B-0010: With `DAILY_COST_LIMIT_USD` set, the cost of each model call is added to
+  a Redis counter for the UTC day (`harnessd:spend:<YYYY-MM-DD>`, whole micro-dollars,
+  expiring after 48 hours) after the call. Agent model calls, compaction summaries
+  and the `chat` injection screen count; eval runs neither count nor are limited.
+  When the day's spend has reached the limit, every `POST /v1/agent/run` (messages
+  and confirmations) and every compaction gets 429 `budget_exceeded` before taking
+  the thread lock, with a `Retry-After` header giving the seconds until 00:00 UTC;
+  reads and deletes are never refused. A run in progress whose model call takes the
+  day to the limit ends as in B-0009, with the message "the daily cost limit of $X
+  was reached; it resets at 00:00 UTC"; a compaction in progress finishes. The
+  limit is checked before a call and spend added after it, so runs at the same time
+  can each go over by up to one model call. A Redis error is a 503 as in SPEC-0002.
+- B-0011: With `DAILY_COST_LIMIT_USD` set, a chat model (`LLM_MODEL`, or the
+  `chat` screen's `INJECTION_SCREEN_MODEL`) missing from the price table is a
+  settings error at startup, so spend is never silently uncounted. Ollama models
+  need no entry.
 
 ### Human oversight and audit
 - B-0012: Confirmation is unchanged (SPEC-0001 B-0005). Each pause, approval and

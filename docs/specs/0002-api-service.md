@@ -38,6 +38,7 @@ AgentResponse
 | 200 | Every completed run, whatever `status` | AgentResponse |
 | 422 | Invalid request | FastAPI's default validation body |
 | 409 | A run is already in progress on the thread_id | `{"error": {"code": "thread_busy", "message": ...}}` |
+| 429 | The daily cost limit is reached (SPEC-0012 B-0010); `Retry-After` gives the seconds until 00:00 UTC | `{"error": {"code": "budget_exceeded", "message": ...}}` |
 | 503 | Redis or the LLM provider is unreachable, or the provider rejects the request (B-0007) | `{"error": {"code": "dependency_unavailable", "message": ...}}` |
 | 500 | Any other unexpected error (B-0008) | `{"error": {"code": "internal", "message": ...}}` |
 

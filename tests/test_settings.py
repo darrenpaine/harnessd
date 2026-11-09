@@ -36,6 +36,9 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "CHECKPOINT_TTL_HOURS",
         "MAX_TOKENS_PER_RUN",
         "MAX_TOKENS_PER_THREAD",
+        "DAILY_COST_LIMIT_USD",
+        "INJECTION_SCREEN",
+        "INJECTION_SCREEN_MODEL",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -226,3 +229,28 @@ def test_token_budget_settings() -> None:
             _settings(**values)
     with pytest.raises(ValidationError, match="MAX_TOKENS_PER_RUN must not be"):
         _settings(max_tokens_per_run=11, max_tokens_per_thread=10)
+
+
+@pytest.mark.spec("SPEC-0012", "B-0011", "AT-0009")
+def test_daily_limit_needs_price() -> None:
+    google = {"llm_provider": "google", "google_api_key": "k"}
+    with pytest.raises(ValidationError, match="needs a price for google gemini-x"):
+        _settings(**google, llm_model="gemini-x", daily_cost_limit_usd=5)
+    # The chat screen's model needs a price too.
+    with pytest.raises(ValidationError, match="needs a price for google judge-x"):
+        _settings(
+            **google,
+            llm_model="gemini-3.5-flash-lite",
+            injection_screen="chat",
+            injection_screen_model="judge-x",
+            daily_cost_limit_usd=5,
+        )
+
+    # Priced, Ollama, or no limit: all fine.
+    assert _settings(
+        **google, llm_model="gemini-3.5-flash-lite", daily_cost_limit_usd=5
+    )
+    assert _settings(llm_provider="ollama", llm_model="any", daily_cost_limit_usd=5)
+    assert _settings(**google, llm_model="gemini-x").daily_cost_limit_usd is None
+    with pytest.raises(ValidationError, match="greater than 0"):
+        _settings(daily_cost_limit_usd=0)

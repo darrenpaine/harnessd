@@ -12,9 +12,11 @@ from typing import Protocol
 
 import httpx
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from agent.budgets import call_tokens
 from agent.llm import build_chat_model
+from agent.spend import DailySpend
 from logs import event, get_logger
 from prompts import INJECTION_SCREEN_CHAT_PROMPT, INJECTION_SCREEN_PROMPT
 from schemas import (
@@ -84,16 +86,26 @@ class ChatScreen:
     """Asks a chat model for the probability as JSON."""
 
     def __init__(
-        self, model: BaseChatModel, *, timeout_seconds: float = TIMEOUT_SECONDS
+        self,
+        model: BaseChatModel,
+        *,
+        timeout_seconds: float = TIMEOUT_SECONDS,
+        spend: DailySpend | None = None,
+        model_name: str = "",
     ) -> None:
         self._model = model
         self._timeout = timeout_seconds
+        self._spend = spend
+        self._model_name = model_name
 
     async def probability(self, text: str) -> float:
         prompt = f"{INJECTION_SCREEN_PROMPT}\n\n{INJECTION_SCREEN_CHAT_PROMPT}"
         messages = [SystemMessage(content=prompt), HumanMessage(content=text)]
         async with asyncio.timeout(self._timeout):
             reply = await self._model.ainvoke(messages)
+        if self._spend is not None:  # SPEC-0012 B-0010
+            assert isinstance(reply, AIMessage)
+            await self._spend.add(self._model_name, call_tokens(messages, reply))
         return ChatScreenReply.model_validate_json(str(reply.text)).probability
 
 
@@ -108,8 +120,9 @@ async def preload(screen: Screen | None) -> None:
         event(log, logging.WARNING, "screen.preload_failed", error=type(exc).__name__)
 
 
-def build_screen(settings: Settings) -> Screen | None:
-    """The configured screen, or None when it is off. Makes no network calls."""
+def build_screen(settings: Settings, spend: DailySpend | None = None) -> Screen | None:
+    """The configured screen, or None when it is off. Makes no network calls. A
+    `chat` screen adds its calls to `spend` (SPEC-0012 B-0010)."""
     model = settings.injection_screen_model
     if settings.injection_screen == "off":
         return None
@@ -120,4 +133,4 @@ def build_screen(settings: Settings) -> Screen | None:
             return SystemOneScreen(settings.ollama_base_url, model)
         case "chat":
             chat = settings.model_copy(update={"llm_model": model})
-            return ChatScreen(build_chat_model(chat))
+            return ChatScreen(build_chat_model(chat), spend=spend, model_name=model)

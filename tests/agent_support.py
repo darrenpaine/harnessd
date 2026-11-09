@@ -18,6 +18,7 @@ from agent.graph import build_graph
 from agent.persistence import ThreadBusyError, ThreadGuard
 from agent.runner import AgentRunner
 from agent.screen import Screen
+from agent.spend import DailySpend
 from fakes import ScriptedChatModel
 from schemas import AgentRequest, AgentResponse
 from settings import LogLevel
@@ -99,6 +100,7 @@ class Agent:
         guard: ThreadGuard | None = None,
         serve: Callable[[httpx.Request], httpx.Response] | None = None,
         screen: Screen | None = None,
+        spend: DailySpend | None = None,
     ) -> None:
         self.fetched: list[str] = []
         self._custom = serve
@@ -110,9 +112,11 @@ class Agent:
             TOOLS,
             checkpointer or InMemorySaver(),
             screen=screen,
+            spend=spend,
         )
+        self.spend = spend
         self.guard = guard or LocalThreadGuard()
-        self.runner = AgentRunner(self.graph, ctx.settings, self.guard)
+        self.runner = AgentRunner(self.graph, ctx.settings, self.guard, spend)
 
     def _serve(self, request: httpx.Request) -> httpx.Response:
         self.fetched.append(str(request.url))
