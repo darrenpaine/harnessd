@@ -14,7 +14,7 @@ import redis_support
 from agent_support import Agent, Capture, MakeClient, StartTracing
 from api.deps import get_graph, get_guard, get_model, get_spend
 from app import app
-from logs import ROOT, configure_logging
+from logs import AUDIT, ROOT, configure_logging
 from settings import LogLevel, Settings, get_settings
 from tools.base import ToolContext
 from tracing import Tracing, configure_tracing
@@ -75,6 +75,7 @@ def capture(caplog: pytest.LogCaptureFixture) -> Iterator[Capture]:
     """Configure logging at a level and route `harnessd` logs to caplog."""
     root = logging.getLogger(ROOT)
     saved = (root.level, root.propagate, list(root.handlers))
+    audit_level = logging.getLogger(AUDIT).level
     http = {name: logging.getLogger(name).level for name in ("httpx", "httpcore")}
 
     def configure(level: LogLevel) -> None:
@@ -87,6 +88,7 @@ def capture(caplog: pytest.LogCaptureFixture) -> Iterator[Capture]:
     root.setLevel(saved[0])
     root.propagate = saved[1]
     root.handlers[:] = saved[2]
+    logging.getLogger(AUDIT).setLevel(audit_level)
     for name, level in http.items():
         logging.getLogger(name).setLevel(level)
 

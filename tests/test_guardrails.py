@@ -24,6 +24,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from pydantic import SecretStr
 
 import api.deps
+from agent.redact import REDACTED, Redactor
 from agent.screen import (
     PRELOAD_TIMEOUT_SECONDS,
     ChatScreen,
@@ -36,6 +37,7 @@ from agent_support import (
     PAGE_TEXT,
     Agent,
     Capture,
+    MakeClient,
     StartTracing,
     fetch,
     finished_spans,
@@ -44,7 +46,9 @@ from agent_support import (
 )
 from app import app
 from fakes import RaisingChatModel, ScriptedChatModel
+from logs import AUDIT
 from prompts import INJECTION_SCREEN_PROMPT, SYSTEM_PROMPT
+from schemas import AgentResponse, ThreadMessage, ThreadState
 from settings import Settings, get_settings
 from tools.base import ToolContext
 from tools.sanitize import strip_invisible
@@ -599,3 +603,78 @@ async def test_screen_preload(
     # would fail if it were asked anything.
     await preload(None)
     await preload(ChatScreen(ScriptedChatModel(replies=[])))
+
+
+TAVILY_KEY = "tvly-test-0123456789"
+SHORT_KEY = "k-1234"  # under 8 characters: never redacted
+
+
+@pytest.mark.spec("SPEC-0012", "B-0003", "B-0004", "AT-0003")
+async def test_secret_redacted(
+    make_client: MakeClient,
+    tool_context: ToolContext,
+    capture: Capture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    capture("warning")
+    settings = tool_context.settings.model_copy(
+        update={
+            "tavily_api_key": SecretStr(TAVILY_KEY),
+            "openai_api_key": SecretStr(SHORT_KEY),
+        }
+    )
+    ctx = dataclasses.replace(tool_context, settings=settings)
+    leaked = f"the keys are {TAVILY_KEY} and {SHORT_KEY}"
+    client, _ = make_client([AIMessage(content=leaked)], ctx=ctx)
+
+    response = await client.post("/v1/agent/run", json={"message": "keys?"})
+
+    body = AgentResponse.model_validate(response.json())
+    assert body.answer == f"the keys are {REDACTED} and {SHORT_KEY}"
+    audited = [vars(r) for r in caplog.records if r.name == AUDIT]
+    [guard] = [r["fields"] for r in audited if r["event"] == "guard"]
+    assert guard == guard | {"check": "secrets", "action": "redacted", "count": 1}
+    assert not any(TAVILY_KEY in r.getMessage() for r in caplog.records)
+
+    # The thread view is redacted too; the checkpoint keeps the raw text.
+    view = await client.get(f"/v1/threads/{body.thread_id}")
+    thread = ThreadState.model_validate(view.json())
+    assert thread.messages[-1].content == body.answer
+    assert TAVILY_KEY not in view.text
+
+
+@pytest.mark.spec("SPEC-0012", "B-0003")
+def test_redactor(tool_context: ToolContext) -> None:
+    """Every secret setting is redacted, in a truncated answer and a summary."""
+    secrets = {
+        "anthropic_api_key": "sk-ant-aaaaaaaa",
+        "google_api_key": "AIza-bbbbbbbb",
+        "openai_api_key": "sk-cccccccc",
+        "tavily_api_key": "tvly-dddddddd",
+        "langfuse_public_key": "pk-lf-eeeeeeee",
+        "langfuse_secret_key": "sk-lf-ffffffff",
+        "otel_exporter_otlp_headers": "Authorization=Basic gggggggg",
+    }
+    settings = tool_context.settings.model_copy(
+        update={name: SecretStr(value) for name, value in secrets.items()}
+    )
+    redactor = Redactor(settings)
+
+    text, count = redactor.redact(" ".join(secrets.values()))
+    assert text == " ".join([REDACTED] * len(secrets)) and count == len(secrets)
+
+    truncated = AgentResponse(
+        thread_id=uuid.uuid4(), status="truncated", answer="key sk-cccccccc"
+    )
+    assert redactor.response(truncated).answer == f"key {REDACTED}"
+
+    state = ThreadState(
+        thread_id=uuid.uuid4(),
+        status="idle",
+        summary="they asked for tvly-dddddddd",
+        messages=[ThreadMessage(role="user", content="mine is sk-lf-ffffffff")],
+    )
+    redacted = redactor.thread(state)
+    assert redacted.summary == f"they asked for {REDACTED}"
+    assert redacted.messages[0].content == f"mine is {REDACTED}"
+    assert Redactor(tool_context.settings).redact("sk-cccccccc") == ("sk-cccccccc", 0)

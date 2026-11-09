@@ -15,7 +15,7 @@ from opentelemetry.trace import Span
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from agent.screen import Screen
-from logs import clip, elapsed_ms, event, get_logger
+from logs import audit, clip, elapsed_ms, event, get_logger
 from schemas import PendingAction, ToolCallRecord, ToolError
 from tools.base import Tool, ToolContext, call_tool, summarize
 from tools.sanitize import strip_model
@@ -25,7 +25,8 @@ MALFORMED = ToolError(code="invalid_input", message="arguments are not valid JSO
 REJECTED = ToolError(code="rejected", message="the user declined this call")
 WITHHELD = ToolError(code="rejected", message="withheld: possible prompt injection")
 
-# tool.call stays on the graph's logger, where it was before this module existed.
+# tool.input and screen.failed stay on the graph's logger, where they were before
+# this module existed; tool.call and guard are audit events (SPEC-0012 B-0013).
 log = get_logger("graph")
 
 _RECORD: TypeAdapter[ToolCallRecord] = TypeAdapter(ToolCallRecord)
@@ -123,7 +124,9 @@ class ToolCalls:
             started = time.perf_counter()
             result: BaseModel = await call_tool(tool, call["args"], self._ctx)
             if not tool.side_effect and not isinstance(result, ToolError):
-                result, _ = strip_model(result)
+                result, stripped = strip_model(result)
+                if stripped:  # SPEC-0012 B-0015
+                    _guard(call, "invisible_chars", "stripped", count=stripped)
                 result = await self._screened(call, result, span)
             tool_result(span, result)
         _log_call(call, result, started)
@@ -150,10 +153,15 @@ class ToolCalls:
                 error=type(exc).__name__,
                 on_error=settings.injection_screen_on_error,
             )
-            withhold = settings.injection_screen_on_error == "withhold"
-            return WITHHELD if withhold else result
+            if settings.injection_screen_on_error == "allow":
+                return result
+            _guard(call, "injection_screen", "withheld", error=True)
+            return WITHHELD
         span.set_attribute("screen.probability", probability)
-        return WITHHELD if probability >= settings.injection_threshold else result
+        if probability < settings.injection_threshold:
+            return result
+        _guard(call, "injection_screen", "withheld", probability=probability)
+        return WITHHELD
 
 
 def _record(call: ToolCall, data: BaseModel, result: BaseModel) -> dict[str, Any]:
@@ -168,14 +176,24 @@ def _log_call(
     call: ToolCall | InvalidToolCall, result: BaseModel, started: float | None
 ) -> None:
     """tool.call for one call; `started` is None for calls that never ran."""
-    event(
-        log,
-        logging.INFO,
+    audit(
         "tool.call",
         tool=call["name"],
         call_id=call["id"],
         result=result.code if isinstance(result, ToolError) else "ok",
         ms=0 if started is None else elapsed_ms(started),
+    )
+
+
+def _guard(call: ToolCall, check: str, action: str, **fields: object) -> None:
+    """A guard action on one call's result (SPEC-0012 B-0013)."""
+    audit(
+        "guard",
+        tool=call["name"],
+        call_id=call["id"],
+        check=check,
+        action=action,
+        **fields,
     )
 
 
