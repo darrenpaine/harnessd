@@ -24,6 +24,7 @@ from langgraph.types import Command, interrupt
 
 from agent.budgets import call_tokens, over_budget
 from agent.screen import Screen
+from agent.spend import DailySpend
 from agent.tool_calls import ToolCalls, Tools, tool_message
 from logs import elapsed_ms, event, get_logger
 from prompts import SYSTEM_PROMPT
@@ -216,28 +217,34 @@ def build_graph(
     checkpointer: BaseCheckpointSaver[Any],
     *,
     screen: Screen | None = None,
+    spend: DailySpend | None = None,
 ) -> AgentGraph:
     """Compile the agent loop with its checkpointer. `screen` is the injection
-    screen, or None when it is off (SPEC-0012 B-0005)."""
+    screen, or None when it is off (SPEC-0012 B-0005); `spend` is the day's spend,
+    or None when there is no daily limit (B-0010)."""
     bound = model.bind_tools([tool_schema(tool) for tool in tools.values()])
     calls = ToolCalls(tools, ctx, screen)
     max_run = ctx.settings.max_tokens_per_run
     max_thread = ctx.settings.max_tokens_per_thread
+    model_name = ctx.settings.llm_model
 
     async def call_model(state: AgentState) -> Command[str]:
-        """One model turn, unless a token budget is used up (SPEC-0012 B-0009,
-        B-0014). A reply that crosses a budget still counts: its answer is
-        returned, but its tool calls are not run."""
+        """One model turn, unless a token budget or the daily cost limit is used
+        up (SPEC-0012 B-0009, B-0010, B-0014). A reply that crosses one still
+        counts: its answer is returned, but its tool calls are not run."""
         _step("model")
         run_tokens = state["run_tokens"]
         thread_tokens = state.get("thread_tokens", 0)
         if stop := over_budget(run_tokens, thread_tokens, max_run, max_thread):
+            return Command(update={"outcome": _budget_outcome(stop)}, goto=END)
+        if spend is not None and (stop := await spend.stop()):
             return Command(update={"outcome": _budget_outcome(stop)}, goto=END)
         started = time.perf_counter()
         prompt = build_prompt(state)
         reply = await bound.ainvoke(prompt)
         assert isinstance(reply, AIMessage)
         tokens = call_tokens(prompt, reply)
+        day_stop = await spend.add(model_name, tokens) if spend is not None else None
         counts = {
             "run_tokens": run_tokens + tokens.count,
             "thread_tokens": thread_tokens + tokens.count,
@@ -261,9 +268,8 @@ def build_graph(
                     goto=END,
                 )
             case RunCalls(invalid):
-                if stop := over_budget(
-                    **counts, max_run=max_run, max_thread=max_thread
-                ):
+                stop = over_budget(**counts, max_run=max_run, max_thread=max_thread)
+                if stop := stop or day_stop:
                     return Command(
                         update={
                             "messages": [reply],

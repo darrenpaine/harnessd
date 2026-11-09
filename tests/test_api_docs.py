@@ -30,7 +30,7 @@ THREAD_RESPONSES = {
     ("post", "/v1/threads/{thread_id}/compact"): (
         "200",
         "CompactResponse",
-        {"404", "409", "422", "500", "503"},
+        {"404", "409", "422", "429", "500", "503"},
     ),
 }
 
@@ -92,7 +92,8 @@ def test_operations_documented() -> None:
 def test_error_responses_documented() -> None:
     spec = schema()
     responses = spec["paths"]["/v1/agent/run"]["post"]["responses"]
-    assert set(responses) == {"200", "409", "422", "500", "503"}
+    assert set(responses) == {"200", "409", "422", "429", "500", "503"}
+    assert ref_name(responses["429"]) == "ApiError"
     assert ref_name(responses["200"]) == "AgentResponse"
     assert ref_name(responses["409"]) == "ApiError"
     assert ref_name(responses["422"]) == "HTTPValidationError"

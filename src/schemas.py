@@ -399,6 +399,7 @@ ApiErrorCode = Literal[
     "thread_not_found",
     "thread_awaiting_confirmation",
     "thread_run_unfinished",
+    "budget_exceeded",
     "dependency_unavailable",
     "internal",
 ]

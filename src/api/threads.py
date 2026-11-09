@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, Path
 
 from agent.threads import ThreadService
 from api.deps import get_threads
-from api.errors import BUSY, NOT_FOUND, UNAVAILABLE, error_responses
+from api.errors import BUSY, NOT_FOUND, SPENT, UNAVAILABLE, error_responses
 from schemas import CompactRequest, CompactResponse, ThreadState
 
 router = APIRouter(prefix="/v1/threads", tags=["threads"])
@@ -55,6 +55,7 @@ async def delete_thread(thread_id: ThreadId, threads: Threads) -> None:
             404: NOT_FOUND,
             409: "A run is in progress, the thread is awaiting confirmation, "
             "or its last run did not finish.",
+            429: SPENT,
             500: "The summary call timed out or returned no text.",
             503: UNAVAILABLE,
         }

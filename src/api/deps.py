@@ -1,6 +1,6 @@
 """Shared services and the FastAPI dependencies routes use (SPEC-0002).
 
-Tests replace `get_graph`, `get_guard` and `get_model` through
+Tests replace `get_graph`, `get_guard`, `get_model` and `get_spend` through
 `app.dependency_overrides`.
 """
 
@@ -22,6 +22,7 @@ from agent.persistence import (
 )
 from agent.runner import AgentRunner
 from agent.screen import Screen, build_screen
+from agent.spend import DailySpend, build_spend
 from agent.threads import ThreadService
 from logs import get_logger
 from settings import Settings, get_settings
@@ -59,10 +60,14 @@ class Services:
             self._model = build_chat_model(settings)
         return self._model
 
+    def spend(self, settings: Settings) -> DailySpend | None:
+        """The day's spend, or None with no daily limit (SPEC-0012 B-0010)."""
+        return build_spend(self.redis(settings), settings)
+
     def screen(self, settings: Settings) -> Screen | None:
         """The injection screen, or None when it is off (SPEC-0012 B-0005)."""
         if not self._screen_built:
-            self._screen = build_screen(settings)
+            self._screen = build_screen(settings, self.spend(settings))
             self._screen_built = True
         return self._screen
 
@@ -78,6 +83,7 @@ class Services:
                     TOOLS,
                     saver,
                     screen=self.screen(settings),
+                    spend=self.spend(settings),
                 )
             return self._graph
 
@@ -122,12 +128,22 @@ def get_guard(request: Request, settings: SettingsDep) -> ThreadGuard:
     return RedisThreadGuard(services.redis(settings), settings)
 
 
+def get_spend(request: Request, settings: SettingsDep) -> DailySpend | None:
+    """The day's spend; tests override this (SPEC-0012 B-0010)."""
+    services: Services = request.app.state.services
+    return services.spend(settings)
+
+
+SpendDep = Annotated[DailySpend | None, Depends(get_spend)]
+
+
 def get_runner(
     graph: Annotated[AgentGraph, Depends(get_graph)],
     guard: Annotated[ThreadGuard, Depends(get_guard)],
     settings: SettingsDep,
+    spend: SpendDep,
 ) -> AgentRunner:
-    return AgentRunner(graph, settings, guard)
+    return AgentRunner(graph, settings, guard, spend)
 
 
 def get_threads(
@@ -135,5 +151,6 @@ def get_threads(
     model: Annotated[BaseChatModel, Depends(get_model)],
     guard: Annotated[ThreadGuard, Depends(get_guard)],
     settings: SettingsDep,
+    spend: SpendDep,
 ) -> ThreadService:
-    return ThreadService(graph, model, settings, guard)
+    return ThreadService(graph, model, settings, guard, spend)

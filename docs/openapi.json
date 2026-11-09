@@ -309,6 +309,7 @@
               "thread_not_found",
               "thread_awaiting_confirmation",
               "thread_run_unfinished",
+              "budget_exceeded",
               "dependency_unavailable",
               "internal"
             ],
@@ -993,6 +994,16 @@
             },
             "description": "Validation Error"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The daily cost limit is reached; `Retry-After` gives the seconds until 00:00 UTC."
+          },
           "500": {
             "content": {
               "application/json": {
@@ -1228,6 +1239,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The daily cost limit is reached; `Retry-After` gives the seconds until 00:00 UTC."
           },
           "500": {
             "content": {

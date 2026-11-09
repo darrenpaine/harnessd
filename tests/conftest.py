@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace.export import SpanExporter
 
 import redis_support
 from agent_support import Agent, Capture, MakeClient, StartTracing
-from api.deps import get_graph, get_guard, get_model
+from api.deps import get_graph, get_guard, get_model, get_spend
 from app import app
 from logs import ROOT, configure_logging
 from settings import LogLevel, Settings, get_settings
@@ -120,13 +120,18 @@ async def make_client(tool_context: ToolContext) -> AsyncGenerator[MakeClient]:
     clients: list[httpx.AsyncClient] = []
 
     def make(
-        replies: list[AIMessage], **agent_options: Any
+        replies: list[AIMessage],
+        *,
+        ctx: ToolContext | None = None,
+        **agent_options: Any,
     ) -> tuple[httpx.AsyncClient, Agent]:
-        agent = Agent(tool_context, replies, **agent_options)
+        """`ctx` replaces the default tool context, e.g. for other settings."""
+        agent = Agent(ctx or tool_context, replies, **agent_options)
         app.dependency_overrides[get_settings] = lambda: agent.ctx.settings
         app.dependency_overrides[get_graph] = lambda: agent.graph
         app.dependency_overrides[get_guard] = lambda: agent.guard
         app.dependency_overrides[get_model] = lambda: agent.model
+        app.dependency_overrides[get_spend] = lambda: agent.spend
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         )

@@ -7,6 +7,8 @@ from typing import Literal, Self
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agent.prices import price_of
+
 LLMProvider = Literal["ollama", "anthropic", "google", "openai"]
 LogLevel = Literal["debug", "info", "warning", "error"]
 LogFormat = Literal["text", "json"]
@@ -40,6 +42,7 @@ class Settings(BaseSettings):
     # Token budgets (SPEC-0012 B-0009, B-0014)
     max_tokens_per_run: int = Field(default=50_000, gt=0)
     max_tokens_per_thread: int = Field(default=200_000, gt=0)
+    daily_cost_limit_usd: float | None = Field(default=None, gt=0)  # B-0010
 
     # Runtime
     redis_url: str = "redis://localhost:6379"
@@ -95,6 +98,23 @@ class Settings(BaseSettings):
             raise ValueError(
                 "MAX_TOKENS_PER_RUN must not be larger than MAX_TOKENS_PER_THREAD"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _limited_models_priced(self) -> Self:
+        """SPEC-0012 B-0011: with a daily limit, every chat model in use has a
+        price, so spend is never silently uncounted."""
+        if self.daily_cost_limit_usd is None:
+            return self
+        models = [self.llm_model]
+        if self.injection_screen == "chat" and self.injection_screen_model:
+            models.append(self.injection_screen_model)
+        for model in models:
+            if price_of(self.llm_provider, model) is None:
+                raise ValueError(
+                    f"DAILY_COST_LIMIT_USD needs a price for {self.llm_provider} "
+                    f"{model}; add it to src/agent/prices.py"
+                )
         return self
 
     @model_validator(mode="after")
