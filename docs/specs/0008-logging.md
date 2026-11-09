@@ -16,22 +16,27 @@ step, each tool call, and how it ends. Message text and secrets are never logged
 
 ### Output
 - Python's standard `logging`, to stderr, no new dependency.
-- Loggers are named `harnessd.<module>` (e.g. `harnessd.runner`, `harnessd.graph`).
+- Loggers are named `harnessd.<module>` (e.g. `harnessd.runner`, `harnessd.graph`),
+  except that audit events are logged by `harnessd.audit` (B-0007).
 - One line per event: time (UTC, ISO 8601), level, logger, event name, then
   `key=value` fields. Example:
-  `2026-10-16T09:30:00Z INFO harnessd.runner run.start thread=6f1c… kind=message max_tool_calls=5 provider=ollama model=llama3.1`
+  `2026-10-16T09:30:00Z INFO harnessd.audit run.start thread=6f1c… kind=message max_tool_calls=5 provider=ollama model=llama3.1`
 
 ### Events
+Events marked **audit** are the audit record (B-0007).
+
 | Event | Level | Fields |
 |-------|-------|--------|
-| `run.start` | info | thread, kind (`message` \| `confirm`), max_tool_calls, provider, model |
+| `run.start` **audit** | info | thread, kind (`message` \| `confirm`), max_tool_calls, provider, model |
 | `graph.step` | info | thread, node (`model` \| `tools` \| `confirm`) |
 | `model.reply` | info | thread, tool_calls (count requested), tokens, estimated (SPEC-0012 B-0008), ms |
-| `tool.call` | info | thread, tool, call_id, result (`ok` or the ToolError code), ms |
+| `tool.call` **audit** | info | thread, tool, call_id, result (`ok` or the ToolError code), ms |
 | `tool.input` | debug | thread, tool, call_id, input (JSON, cut to 200 chars) |
-| `confirm.wait` | info | thread, tool |
-| `confirm.decision` | info | thread, tool, approved |
-| `run.end` | info | thread, status, tool_calls, ms; plus error code when status is error |
+| `confirm.wait` **audit** | info | thread, tool |
+| `confirm.decision` **audit** | info | thread, tool, approved |
+| `guard` **audit** | info | thread, check, action, and probability, error or count (SPEC-0012 B-0013) |
+| `budget.stop` **audit** | info | thread, scope (`run` \| `thread` \| `day`), used, limit (SPEC-0012 B-0013) |
+| `run.end` **audit** | info | thread, status, tool_calls, tokens, estimated (any call's tokens estimated), cost_usd (left out when the model has no price), ms; plus error code when status is error |
 | `thread.busy` | warning | thread |
 | `thread.compact_failed` | warning | thread, reason (`timeout` \| `empty`) (SPEC-0009 B-0008) |
 | `screen.failed` | warning | thread, tool, call_id, error (the exception type), on_error (SPEC-0012 B-0006) |
@@ -42,7 +47,8 @@ step, each tool call, and how it ends. Message text and secrets are never logged
 | `thread.*` | info | the thread endpoint events in SPEC-0009 |
 
 ## Behavior
-- B-0001: `LOG_LEVEL` sets the level of the `harnessd` loggers. Default `info`.
+- B-0001: `LOG_LEVEL` sets the level of the `harnessd` loggers. Default `info`. The
+  exception is `harnessd.audit`, which stays at `info` (B-0007).
 - B-0002: At `info`, a run logs `run.start`, one `graph.step` per node executed, one
   `model.reply` per model call, one `tool.call` per tool call (including errored
   ones), the confirmation events, and `run.end`, each with the fields above.
@@ -55,6 +61,11 @@ step, each tool call, and how it ends. Message text and secrets are never logged
 - B-0006: Below `debug`, the `httpx` and `httpcore` loggers are set to `warning`, so
   each provider or tool HTTP request is not logged. Uvicorn's own logging is left
   as is.
+- B-0007: The audit events (marked in the table) are logged by `harnessd.audit`,
+  which stays at `info` whatever `LOG_LEVEL` is, so they are still written at
+  `warning` or `error`. They are the stable record of a run (SPEC-0012 B-0013):
+  their names and fields change only with a spec change. Each is logged once;
+  there is no separate audit copy.
 
 ## Acceptance tests
 All use pytest's `caplog` and a scripted fake model (SPEC-0005).
@@ -74,6 +85,9 @@ All use pytest's `caplog` and a scripted fake model (SPEC-0005).
   503 logs dependency.unavailable at warning. -> `tests/test_logging.py::test_error_responses_logged`
 - AT-0006 (B-0006): At `info`, the httpx logger's effective level is `warning`; at
   `debug` it is `debug`. -> `tests/test_logging.py::test_http_client_logs_quiet`
+- AT-0007 (B-0007): At `LOG_LEVEL=warning`, a run still logs its audit events from
+  `harnessd.audit`, and none of the others, such as graph.step or model.reply.
+  -> `tests/test_audit.py::test_audit_events`
 
 ## Non-goals
 Log shipping, metrics, per-module levels. Tracing, JSON output
