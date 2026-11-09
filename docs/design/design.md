@@ -160,7 +160,7 @@ flowchart TD
     model -->|answer| ok([END: ok])
     model -->|no answer, or invalid<br/>calls twice in a row| error([END: error<br/>model_output_invalid])
     model -->|calls exceed max_tool_calls| truncated([END: truncated])
-    model -->|run or thread token<br/>budget reached| budget([END: error<br/>budget_exceeded])
+    model -->|token budget or daily<br/>cost limit reached| budget([END: error<br/>budget_exceeded])
     model -->|calls queued| tools
     tools["tools<br/>run queued calls in order;<br/>invalid calls get ToolError invalid_input"]
     tools -->|queue empty| model
