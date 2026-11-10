@@ -22,7 +22,8 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 
-from agent.budgets import call_tokens, over_budget
+from agent.budgets import BudgetStop, call_tokens, over_budget
+from agent.prices import cost_micro_usd, price_of
 from agent.screen import Screen
 from agent.spend import DailySpend
 from agent.tool_calls import ToolCalls, Tools, tool_message
@@ -52,6 +53,8 @@ class RunCounters(TypedDict):
     max_tool_calls: int
     calls_used: int
     run_tokens: int  # SPEC-0012 B-0009
+    run_estimated: bool  # any call's tokens estimated (B-0008)
+    run_cost: int  # micro-USD from the price table; 0 when unpriced (B-0013)
     trace: list[dict[str, Any]]  # ToolCallRecord dumps, in call order
     outcome: Outcome | None
 
@@ -202,8 +205,10 @@ def model_turn(reply: AIMessage, state: AgentState, calls: ToolCalls) -> Verdict
     return RunCalls(invalid=invalid)
 
 
-def _budget_outcome(message: str) -> Outcome:
-    return Outcome(status="error", code="budget_exceeded", message=message)
+def _budget_outcome(stop: BudgetStop) -> Outcome:
+    """The run's outcome on a budget stop, which is logged (SPEC-0012 B-0013)."""
+    stop.log()
+    return Outcome(status="error", code="budget_exceeded", message=stop.message)
 
 
 def _step(node: str) -> None:
@@ -227,6 +232,7 @@ def build_graph(
     max_run = ctx.settings.max_tokens_per_run
     max_thread = ctx.settings.max_tokens_per_thread
     model_name = ctx.settings.llm_model
+    price = price_of(ctx.settings.llm_provider, model_name)
 
     async def call_model(state: AgentState) -> Command[str]:
         """One model turn, unless a token budget or the daily cost limit is used
@@ -245,9 +251,14 @@ def build_graph(
         assert isinstance(reply, AIMessage)
         tokens = call_tokens(prompt, reply)
         day_stop = await spend.add(model_name, tokens) if spend is not None else None
+        cost = cost_micro_usd(price, tokens.input, tokens.output) if price else 0
         counts = {
             "run_tokens": run_tokens + tokens.count,
             "thread_tokens": thread_tokens + tokens.count,
+        }
+        usage = {
+            "run_estimated": state["run_estimated"] or tokens.estimated,
+            "run_cost": state["run_cost"] + cost,
         }
         requested = len(reply.tool_calls) + len(reply.invalid_tool_calls)
         event(
@@ -261,10 +272,17 @@ def build_graph(
         )
         match model_turn(reply, state, calls):
             case Answer():
-                return Command(update={"messages": [reply], **counts}, goto=END)
+                return Command(
+                    update={"messages": [reply], **counts, **usage}, goto=END
+                )
             case Stop(outcome):
                 return Command(
-                    update={"messages": [reply], "outcome": outcome, **counts},
+                    update={
+                        "messages": [reply],
+                        "outcome": outcome,
+                        **counts,
+                        **usage,
+                    },
                     goto=END,
                 )
             case RunCalls(invalid):
@@ -275,11 +293,13 @@ def build_graph(
                             "messages": [reply],
                             "outcome": _budget_outcome(stop),
                             **counts,
+                            **usage,
                         },
                         goto=END,
                     )
                 update: dict[str, Any] = {
                     **counts,
+                    **usage,
                     "messages": [reply, *calls.malformed(reply)],
                     "queue": reply.tool_calls,
                     "calls_used": state["calls_used"] + requested,

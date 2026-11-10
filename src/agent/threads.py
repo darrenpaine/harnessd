@@ -24,6 +24,7 @@ from agent.agent_threads import AgentThreads
 from agent.budgets import call_tokens
 from agent.graph import AgentGraph
 from agent.persistence import ThreadGuard
+from agent.redact import Redactor
 from agent.spend import DailySpend
 from logs import elapsed_ms, event, get_logger, log_context
 from prompts import SUMMARY_PROMPT
@@ -70,6 +71,7 @@ class ThreadService:
         self.settings = settings
         self.guard = guard
         self.spend = spend
+        self.redactor = Redactor(settings)
 
     async def read(self, thread_id: UUID) -> ThreadState:
         """B-0001: the latest state, without the lock or a TTL reset."""
@@ -84,7 +86,7 @@ class ThreadService:
                 expires_in_seconds=await self.guard.expires_in(str(thread_id)),
             )
             event(log, logging.INFO, "thread.read")
-            return thread
+            return self.redactor.thread(thread)  # SPEC-0012 B-0003
 
     async def delete(self, thread_id: UUID) -> None:
         """B-0002: remove every checkpoint of the thread, under its lock. A

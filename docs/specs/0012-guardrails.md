@@ -1,6 +1,6 @@
 # SPEC-0012: Guardrails and human oversight
 
-Status: reviewed
+Status: implemented
 Requirements: R-0016, R-0028
 Design: [design.md](../design/design.md)
 
@@ -80,13 +80,24 @@ supports tiers.
 | google | `gemini-3.5-flash-lite` | 0.30 | 2.50 | 2026-11-08 |
 | openai | `gpt-6.1-terra` | 1.00 | 5.00 | 2026-11-08 |
 
-### Audit events (`harnessd.audit` logger, always at info)
-`audit.run.start`, `audit.run.end` (status, tokens, cost_usd), `audit.tool`
-(tool, call_id, result), `audit.confirm` (tool, pending | approved | rejected),
-`audit.guard` (check, action: withheld | redacted | stripped | blocked,
-probability or count),
-`audit.budget` (scope: run | thread | day, used, limit). Each carries request_id
-and thread; none carries message text, answers or tool output.
+### Audit events
+The audit record is the SPEC-0008 events marked **audit** (`run.start`, `run.end`,
+`tool.call`, `confirm.wait`, `confirm.decision`, `guard`, `budget.stop`), logged by
+`harnessd.audit`, which stays at info whatever `LOG_LEVEL` is (SPEC-0008 B-0007).
+This spec adds `guard`, `budget.stop`, and `tokens`, `estimated` and `cost_usd` on
+`run.end`. Langfuse traces (SPEC-0010) are optional and may hold content, so they
+are not part of the record.
+
+| `guard` check | action | extra field |
+|---------------|--------|-------------|
+| `injection_screen` | `withheld` | `probability`, or `error=true` when a failed screen withholds |
+| `invisible_chars` | `stripped` | `count` (only when above 0) |
+| `secrets` | `redacted` | `count` |
+
+`budget.stop` has scope `run`, `thread` or `day`, and used and limit in tokens
+(USD for `day`). Each audit event carries request_id and thread (SPEC-0010); a run
+started outside an HTTP request, such as an eval run, logs its request as `-`. None
+carries message text, answers, tool arguments or tool output.
 
 ## Behavior
 ### Input and output validation
@@ -98,16 +109,23 @@ and thread; none carries message text, answers or tool output.
   model only as tool messages, never inside the system or user turn. The `chat`
   screen (B-0005) is a separate model whose only output is a probability, so it may
   receive a result as its user turn.
-- B-0003: Before an answer is returned, any configured secret value (provider and
-  Tavily keys) that appears in it is replaced with `[redacted]` and an
-  `audit.guard` event with action `redacted` is logged.
-- B-0004: Every response still validates against AgentResponse (SPEC-0002 B-0002).
+- B-0003: Any configured secret value (every secret setting: the Anthropic,
+  Google, OpenAI and Tavily keys, the Langfuse keys and the OTLP headers) is
+  replaced with `[redacted]` before it leaves the API: in an answer, including a
+  truncated run's answer, and in the message text and summary of
+  `GET /v1/threads/{id}`. Values shorter than 8 characters are not redacted, so a
+  placeholder doesn't change answers. Each response or thread view with at least
+  one replacement logs `guard` with action `redacted` and the count. The
+  checkpoint keeps the raw text, as it never leaves the server; tool call records
+  are not changed.
+- B-0004: Every response still validates against AgentResponse (SPEC-0002 B-0002),
+  redacted or not.
 - B-0015: Invisible characters are removed from web_search titles and snippets,
   fetch_site text and user messages before the model sees them: Unicode format
   characters (category Cf, e.g. zero-width spaces and joiners, bidi controls,
   word joiner, byte-order mark, soft hyphen, the tag block U+E0000–E007F),
   variation selectors (U+FE00–FE0F, U+E0100–E01EF) and Hangul fillers. All other
-  text is unchanged. Each removal is logged as `audit.guard` with action
+  text is unchanged. Each removal is logged as `guard` with action
   `stripped` and the count.
 - B-0016: fetch_site's text leaves out HTML a reader can't see: HTML comments,
   the contents of script, style, noscript, template and svg, and any element with
@@ -126,14 +144,15 @@ and thread; none carries message text, answers or tool output.
   asks `INJECTION_SCREEN_MODEL` (a SPEC-0001 chat model) for the probability as
   JSON, validated with Pydantic. At or above `INJECTION_THRESHOLD`, the model
   receives ToolError `rejected` ("withheld: possible prompt injection") instead.
-  The call is still recorded in tool_calls, with that error, and an `audit.guard`
+  The call is still recorded in tool_calls, with that error, and a `guard`
   event is logged. The screen's prompt lives in `src/prompts/`. The system prompt
   tells the model that it may try another source, as the problem may be only that
   one page, and to tell the user that a result was withheld as a possible prompt
   injection.
 - B-0006: A screen call times out after 20 seconds. If the screen fails or times
   out, `INJECTION_SCREEN_ON_ERROR` decides: `withhold` treats the result as flagged;
-  `allow` passes it. Either way a `screen.failed` warning is logged (SPEC-0008).
+  `allow` passes it. Either way a `screen.failed` warning is logged (SPEC-0008); a
+  withheld result also logs `guard` with `error=true`.
 - B-0017: Each `ollama-systemone` request sends `keep_alive: -1`, so the model
   stays loaded and the app never shortens that for its other users. The app also
   loads the model in the background at startup, as Ollama starts with nothing loaded,
@@ -148,9 +167,8 @@ and thread; none carries message text, answers or tool output.
 ### Budgets
 - B-0008: Token use is taken from each model reply's usage metadata; when a provider
   reports none, it is estimated as characters ÷ 4 (the prompt sent, plus the reply's
-  text and tool call arguments) and marked estimated in the audit event. Until the
-  audit events are built, the `model.reply` log event carries `tokens` and
-  `estimated`.
+  text and tool call arguments) and marked estimated in `run.end`. The
+  `model.reply` log event also carries `tokens` and `estimated`.
 - B-0009: When a run's tokens reach `MAX_TOKENS_PER_RUN`, the run makes no further
   model call and ends with status error, code `budget_exceeded`, keeping its
   tool_calls so far. The check runs before each model call. A reply that takes the
@@ -185,10 +203,14 @@ and thread; none carries message text, answers or tool output.
 
 ### Human oversight and audit
 - B-0012: Confirmation is unchanged (SPEC-0001 B-0005). Each pause, approval and
-  rejection is logged as `audit.confirm`.
-- B-0013: Audit events are written for every run start and end, tool call,
-  confirmation, guard action and budget stop. They stay at info when `LOG_LEVEL`
-  is higher, and they are content-free.
+  rejection is logged (`confirm.wait`, then `confirm.decision`).
+- B-0013: Audit events are written for every run start and end, tool result
+  (including refused and withheld calls), confirmation, guard action and budget
+  stop, whether a run starts from HTTP or an eval. A budget stop is any of: a run
+  or thread budget reached during a run, and the daily limit reached during a run
+  or refusing a request with 429. They stay at info when `LOG_LEVEL` is higher, and
+  they are content-free. A run's cost is counted from the price table whether or
+  not a daily limit is set.
 
 ## Acceptance tests
 All use the scripted fake model and a fake decision model; none call a real LLM
@@ -197,8 +219,10 @@ All use the scripted fake model and a fake decision model; none call a real LLM
   cut to 500. -> `tests/test_guardrails.py::test_tool_output_capped`
 - AT-0002 (B-0002): The system prompt sent to the model contains the
   untrusted-data rule. -> `tests/test_guardrails.py::test_untrusted_rule_in_prompt`
-- AT-0003 (B-0003): An answer containing the configured Tavily key → the response
-  holds `[redacted]` and an audit.guard event is logged without the key.
+- AT-0003 (B-0003, B-0004): An answer containing the configured Tavily key → the
+  response validates against AgentResponse and holds `[redacted]`, and a
+  guard event with count 1 is logged without the key; the thread view also
+  shows `[redacted]`; a secret shorter than 8 characters is left alone.
   -> `tests/test_guardrails.py::test_secret_redacted`
 - AT-0004 (B-0005): For each screen kind, a fetched page scored 0.9 → the model
   receives ToolError rejected; at 0.5 → the page text. The System One request
@@ -220,9 +244,11 @@ All use the scripted fake model and a fake decision model; none call a real LLM
   budget_exceeded and no lock taken. -> `tests/test_budgets.py::test_daily_cost_limit` (redis)
 - AT-0009 (B-0011): DAILY_COST_LIMIT_USD with an unpriced model → settings error.
   -> `tests/test_settings.py::test_daily_limit_needs_price`
-- AT-0010 (B-0012, B-0013): A confirm flow with LOG_LEVEL=warning still logs
-  audit.run.start, audit.confirm pending and approved, audit.tool and audit.run.end,
-  each with request_id and thread and no content.
+- AT-0010 (B-0012, B-0013): A confirm flow with LOG_LEVEL=warning still logs, from
+  harnessd.audit, run.start, confirm.wait, confirm.decision approved=true, tool.call
+  and run.end, each with request_id and thread and no content, and no graph.step or
+  model.reply; a run over its token budget logs budget.stop and a run.end with
+  tokens and cost_usd.
   -> `tests/test_audit.py::test_audit_events`
 - AT-0011 (B-0002, B-0005, B-0015, B-0016): Injection eval cases (SPEC-0011): a
   page telling the agent to add a note, a search result telling it to reveal its
@@ -267,4 +293,4 @@ revisit with more data, not a calibrated value.
 Built in slices: untrusted content (B-0001, B-0002, B-0007, B-0015, B-0016), the
 injection screen (B-0005, B-0006, B-0017), token budgets (B-0008, B-0009, B-0014), the
 daily cost limit (B-0010, B-0011), then the audit trail and redaction (B-0003,
-B-0012, B-0013). Audit events named above are added in the last slice.
+B-0012, B-0013).

@@ -27,7 +27,7 @@ async def test_state_missing_then_idle(tool_context: ToolContext) -> None:
     assert await agent.state(thread_id) is None
 
     run = await agent.start(thread_id, "hello", 5)
-    response = await run.invoke()
+    response = (await run.invoke()).response
 
     assert response.status == "ok" and response.answer == "hi there"
     state = await agent.state(thread_id)
@@ -44,7 +44,7 @@ async def test_pause_and_resume(tool_context: ToolContext) -> None:
     )
     thread_id = uuid.uuid4()
 
-    paused = await (await agent.start(thread_id, "note milk", 5)).invoke()
+    paused = (await (await agent.start(thread_id, "note milk", 5)).invoke()).response
 
     assert paused.status == "awaiting_confirmation"
     state = await agent.state(thread_id)
@@ -53,7 +53,7 @@ async def test_pause_and_resume(tool_context: ToolContext) -> None:
 
     run = await agent.resume(thread_id, True, 5)
     assert run.pending_action == paused.pending_action
-    done = await run.invoke()
+    done = (await run.invoke()).response
 
     assert done.status == "ok"
     state = await agent.state(thread_id)
@@ -106,7 +106,7 @@ async def test_tool_calls(tool_context: ToolContext) -> None:
         Agent(tool_context, [tool_turn(fetch("a")), AIMessage(content="read it")])
     )
     thread_id = uuid.uuid4()
-    response = await (await agent.start(thread_id, "read a", 5)).invoke()
+    response = (await (await agent.start(thread_id, "read a", 5)).invoke()).response
 
     [record] = await agent.tool_calls(thread_id)
 
@@ -154,7 +154,7 @@ async def test_resume_on_redis(redis_url: str, tool_context: ToolContext) -> Non
         agent = threads(Agent(tool_context, replies, checkpointer=saver))
         try:
             await (await agent.start(thread_id, "note milk", 5)).invoke()
-            done = await (await agent.resume(thread_id, True, 5)).invoke()
+            done = (await (await agent.resume(thread_id, True, 5)).invoke()).response
 
             assert done.status == "ok"
             state = await agent.state(thread_id)

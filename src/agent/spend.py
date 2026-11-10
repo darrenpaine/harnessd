@@ -12,7 +12,7 @@ from typing import Protocol
 
 from redis.asyncio import Redis
 
-from agent.budgets import Tokens
+from agent.budgets import BudgetStop, Tokens
 from agent.prices import MICRO_USD, cost_micro_usd, price_of
 from settings import Settings
 
@@ -73,17 +73,19 @@ class DailySpend:
         self._limit = round(settings.daily_cost_limit_usd * MICRO_USD)
         self._now = now
 
-    async def stop(self) -> str | None:
-        """The message to end on when the day's spend has reached the limit."""
-        return self._message(await self._store.total(self._key()))
+    async def stop(self) -> BudgetStop | None:
+        """The stop to end on when the day's spend has reached the limit."""
+        return self._stop(await self._store.total(self._key()))
 
     async def refuse_if_reached(self) -> None:
-        """Raise DailyLimitError when the limit is reached (before the lock)."""
-        if message := await self.stop():
-            raise DailyLimitError(message, self.retry_after())
+        """Raise DailyLimitError when the limit is reached (before the lock),
+        logging budget.stop (B-0013)."""
+        if stop := await self.stop():
+            stop.log()
+            raise DailyLimitError(stop.message, self.retry_after())
 
-    async def add(self, model: str, tokens: Tokens) -> str | None:
-        """Add one call's cost; the stop message if the day is now at the limit.
+    async def add(self, model: str, tokens: Tokens) -> BudgetStop | None:
+        """Add one call's cost; the stop if the day is now at the limit.
         Settings ensure every model in use has a price (B-0011)."""
         price = price_of(self._provider, model)
         if price is None:
@@ -93,7 +95,7 @@ class DailySpend:
         total = (
             await self._store.add(key, cost) if cost else await self._store.total(key)
         )
-        return self._message(total)
+        return self._stop(total)
 
     def retry_after(self) -> int:
         """Whole seconds until 00:00 UTC, at least 1."""
@@ -106,13 +108,14 @@ class DailySpend:
     def _key(self) -> str:
         return f"{KEY_PREFIX}{self._now():%Y-%m-%d}"
 
-    def _message(self, total: int) -> str | None:
+    def _stop(self, total: int) -> BudgetStop | None:
         if total < self._limit:
             return None
-        return (
+        message = (
             f"the daily cost limit of ${self._limit_usd:.2f} was reached; "
             "it resets at 00:00 UTC"
         )
+        return BudgetStop("day", total / MICRO_USD, self._limit_usd, message)
 
 
 def build_spend(redis: Redis, settings: Settings) -> DailySpend | None:

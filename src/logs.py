@@ -16,12 +16,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from types import MappingProxyType
+from typing import Any
 
 from opentelemetry import trace
 
 from settings import Settings
 
 ROOT = "harnessd"
+AUDIT = f"{ROOT}.audit"  # the audit events (SPEC-0008 B-0007)
 HTTP_LOGGERS = ("httpx", "httpcore")
 INPUT_LIMIT = 200
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -35,6 +37,12 @@ _context: ContextVar[MappingProxyType[str, object]] = ContextVar(
 
 def get_logger(module: str) -> logging.Logger:
     return logging.getLogger(f"{ROOT}.{module}")
+
+
+def audit(name: str, **fields: Any) -> None:
+    """Log an audit event: at info on `harnessd.audit`, which LOG_LEVEL never
+    silences (SPEC-0008 B-0007, SPEC-0012 B-0013). Fields must hold no content."""
+    event(logging.getLogger(AUDIT), logging.INFO, name, **fields)
 
 
 class JsonFormatter(logging.Formatter):
@@ -70,7 +78,7 @@ def formatter(settings: Settings) -> logging.Formatter:
 
 def configure_logging(settings: Settings) -> None:
     """Send `harnessd` logs to stderr at LOG_LEVEL in LOG_FORMAT (SPEC-0008
-    B-0001, B-0006; SPEC-0010 B-0008).
+    B-0001, B-0006; SPEC-0010 B-0008). The audit logger stays at info (B-0007).
 
     The handler is added once, so calling this again only changes the levels
     and the format.
@@ -79,6 +87,7 @@ def configure_logging(settings: Settings) -> None:
     root = logging.getLogger(ROOT)
     root.setLevel(level)
     root.propagate = False
+    logging.getLogger(AUDIT).setLevel(logging.INFO)
     handler = next((h for h in root.handlers if getattr(h, "harnessd", False)), None)
     if handler is None:
         handler = logging.StreamHandler(sys.stderr)
