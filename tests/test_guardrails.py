@@ -625,7 +625,9 @@ async def test_secret_redacted(
     )
     ctx = dataclasses.replace(tool_context, settings=settings)
     leaked = f"the keys are {TAVILY_KEY} and {SHORT_KEY}"
-    client, _ = make_client([AIMessage(content=leaked)], ctx=ctx)
+    summary = f"they asked for {TAVILY_KEY}"
+    replies = [AIMessage(content=leaked), AIMessage(content=summary)]
+    client, _ = make_client(replies, ctx=ctx)
 
     response = await client.post("/v1/agent/run", json={"message": "keys?"})
 
@@ -641,6 +643,12 @@ async def test_secret_redacted(
     thread = ThreadState.model_validate(view.json())
     assert thread.messages[-1].content == body.answer
     assert TAVILY_KEY not in view.text
+
+    # So is the summary a compaction returns.
+    compact = await client.post(
+        f"/v1/threads/{body.thread_id}/compact", json={"keep_turns": 0}
+    )
+    assert compact.json()["summary"] == f"they asked for {REDACTED}"
 
 
 @pytest.mark.spec("SPEC-0012", "B-0003")
