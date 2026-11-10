@@ -112,10 +112,11 @@ carries message text, answers, tool arguments or tool output.
 - B-0003: Any configured secret value (every secret setting: the Anthropic,
   Google, OpenAI and Tavily keys, the Langfuse keys and the OTLP headers) is
   replaced with `[redacted]` before it leaves the API: in an answer, including a
-  truncated run's answer, and in the message text and summary of
-  `GET /v1/threads/{id}`. Values shorter than 8 characters are not redacted, so a
-  placeholder doesn't change answers. Each response or thread view with at least
-  one replacement logs `guard` with action `redacted` and the count. The
+  truncated run's answer, in the message text and summary of
+  `GET /v1/threads/{id}`, and in the summary `POST /v1/threads/{id}/compact`
+  returns. Values shorter than 8 characters are not redacted, so a placeholder
+  doesn't change answers. Each response or thread view with at least one
+  replacement logs `guard` with action `redacted` and the count. The
   checkpoint keeps the raw text, as it never leaves the server; tool call records
   are not changed.
 - B-0004: Every response still validates against AgentResponse (SPEC-0002 B-0002),
@@ -222,7 +223,8 @@ All use the scripted fake model and a fake decision model; none call a real LLM
 - AT-0003 (B-0003, B-0004): An answer containing the configured Tavily key → the
   response validates against AgentResponse and holds `[redacted]`, and a
   guard event with count 1 is logged without the key; the thread view also
-  shows `[redacted]`; a secret shorter than 8 characters is left alone.
+  shows `[redacted]`, and so does the summary a compaction returns; a secret
+  shorter than 8 characters is left alone.
   -> `tests/test_guardrails.py::test_secret_redacted`
 - AT-0004 (B-0005): For each screen kind, a fetched page scored 0.9 → the model
   receives ToolError rejected; at 0.5 → the page text. The System One request
