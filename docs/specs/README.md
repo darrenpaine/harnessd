@@ -5,10 +5,10 @@ SPEC-0006.
 
 | Id | Title | Status | File |
 |----|-------|--------|------|
-| SPEC-0001 | Agent core | draft | [0001-agent-core.md](0001-agent-core.md) |
+| SPEC-0001 | Agent core | reviewed | [0001-agent-core.md](0001-agent-core.md) |
 | SPEC-0002 | API service | implemented | [0002-api-service.md](0002-api-service.md) |
 | SPEC-0003 | Tool contract | implemented | [0003-tool-contract.md](0003-tool-contract.md) |
-| SPEC-0004 | State and persistence | draft | [0004-state-persistence.md](0004-state-persistence.md) |
+| SPEC-0004 | State and persistence | reviewed | [0004-state-persistence.md](0004-state-persistence.md) |
 | SPEC-0005 | Test strategy | implemented | [0005-test-strategy.md](0005-test-strategy.md) |
 | SPEC-0006 | Traceability | implemented | [0006-traceability.md](0006-traceability.md) |
 | SPEC-0007 | API documentation | implemented | [0007-api-docs.md](0007-api-docs.md) |
