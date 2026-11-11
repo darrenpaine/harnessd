@@ -6,6 +6,8 @@ validated, structured responses. Conversation state is checkpointed in Redis.
 Specs live in `docs/specs/`; `docs/specs/README.md` lists them with their status.
 B and AT ids are numbered per spec, so always write them with the spec id
 (e.g. SPEC-0002 B-0003); see SPEC-0006.
+`GLOSSARY.md` defines the project's terms (thread, run, metered model, ...); use
+them as written in specs, docs, code and commit messages.
 
 ## Stack
 - Python 3.14, managed with `uv` (use `uv add` / `uv sync`, never bare pip)
