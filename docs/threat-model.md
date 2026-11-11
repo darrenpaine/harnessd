@@ -77,7 +77,7 @@ Status values:
 
 | Id | STRIDE | Threat | Mitigation | Status |
 |----|--------|--------|------------|--------|
-| T-11 | Info disclosure, Tampering | Redis has no password or TLS, and compose publishes port 6379 on the host. Anyone who reaches it can read every thread, edit checkpoints, or reset the day's spend. | None locally. SPEC-0013 B-0003 uses `rediss://` with a managed Redis. | planned; open locally: [#66](https://github.com/darrenpaine/harnessd/issues/66) |
+| T-11 | Info disclosure, Tampering | Redis has no password or TLS. Anyone who reaches it can read every thread, edit checkpoints, or reset the day's spend. | Compose publishes it on 127.0.0.1 only, so only processes on the same machine reach it ([#66](https://github.com/darrenpaine/harnessd/issues/66)). SPEC-0013 B-0003 uses `rediss://` with a managed Redis. | mitigated locally; planned for deployment |
 | T-12 | Info disclosure | Checkpoints hold raw message text, including any secret a user or page put there; redaction happens only on the way out. | Deliberate: the checkpoint never leaves the server (SPEC-0012 B-0003). Threads expire after `CHECKPOINT_TTL_HOURS` (SPEC-0004 B-0003) and can be deleted (SPEC-0009 B-0002). | accepted |
 | T-13 | Tampering | A crafted or corrupted checkpoint breaks every request on a thread. | DELETE removes a thread without loading its state (SPEC-0009 B-0002). An interrupted confirmation no longer leaves a thread unusable (SPEC-0004 B-0007). | mitigated for known cases |
 | T-14 | Denial of service | Redis is down, slow, or its keyspace is large. | 503 with no stack trace (SPEC-0002 B-0005). The TTL refresh scans the whole keyspace ([#14](https://github.com/darrenpaine/harnessd/issues/14); SPEC-0013 B-0006). | partly |
@@ -154,7 +154,6 @@ reason.
 
 | Threat | What is missing | Issue |
 |--------|-----------------|-------|
-| T-11 | Redis is published on the host without a password. | [#66](https://github.com/darrenpaine/harnessd/issues/66) |
 | T-20 | DNS rebinding in fetch_site. | [#71](https://github.com/darrenpaine/harnessd/issues/71) |
 | T-06 | `pending_action.input` and tool call records are returned unredacted. | [#69](https://github.com/darrenpaine/harnessd/issues/69) |
 | T-32 | The container runs as root. | [#67](https://github.com/darrenpaine/harnessd/issues/67) |

@@ -3,7 +3,9 @@ services:
     # Redis 8+ includes the JSON and search modules the checkpointer needs.
     image: redis:8.2
     ports:
-      - "6379:6379"
+      # Only this machine: Redis has no password, and holds every thread and the
+      # day's spend (threat model T-11). The app reaches it on the compose network.
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
