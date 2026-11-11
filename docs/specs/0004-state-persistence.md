@@ -1,6 +1,6 @@
 # SPEC-0004: State and persistence
 
-Status: implemented
+Status: reviewed
 Requirements: R-0005, R-0006, R-0013
 Design: [design.md](../design/design.md)
 
@@ -31,6 +31,11 @@ concurrent runs on one thread are prevented.
 - B-0006: A thread can pause for confirmation any number of times. Loading a
   thread uses only the pending writes saved with its latest checkpoint, never
   those left over from earlier steps, so each confirmation behaves like the first.
+- B-0007: A confirmation whose run stops while the confirmed tool runs (a timeout or
+  a crash) leaves the thread usable. The thread is unfinished, not awaiting
+  confirmation: GET succeeds, `confirm` is refused like any confirm with nothing
+  pending (SPEC-0002 B-0003), and the next message finishes the run without running
+  the tool again (SPEC-0001 B-0007).
 
 ## Acceptance tests
 All use real Redis (SPEC-0005), never a checkpointer mock.
@@ -50,6 +55,11 @@ All use real Redis (SPEC-0005), never a checkpointer mock.
   awaiting_confirmation, each confirm returns ok, two notes are written, the third
   call's result is `rejected`, and GET (SPEC-0009) succeeds after every request.
   -> `tests/test_checkpoint.py::test_repeated_confirmations`
+- AT-0007 (B-0007): add_note requested, then confirmed with the note write slowed
+  past `RUN_TIMEOUT_SECONDS` → the confirm returns status="error"; GET returns
+  status unfinished with no pending action; a second confirm is a 422; a new message
+  returns ok; GET succeeds after every request; one note is written.
+  -> `tests/test_checkpoint.py::test_interrupted_confirmation`
 
 ## Non-goals
 Listing threads, migrating checkpoint formats. Reading, deleting and compacting

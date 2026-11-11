@@ -52,12 +52,17 @@ fit a provider quota, such as a free tier's requests-per-minute limit (B-0008).
   confirm=true runs the tool and continues; confirm=false records ToolError "rejected"
   and continues. The calls in one model turn run in order: calls before a
   side-effecting call run first, and calls after it run once it is confirmed or
-  rejected. Each side-effecting call is confirmed separately.
+  rejected. Each side-effecting call is confirmed separately. The decision is
+  saved before a confirmed tool runs.
 - B-0006: A run is limited to `RUN_TIMEOUT_SECONDS` (default 60) total; on timeout the
   run ends with status="error", code "internal".
 - B-0007: A thread stays usable after a truncated or timed-out run. On the next run,
   tool calls from earlier turns that never ran are shown to the model as ToolError
   `internal` ("not run"), so the history the provider sees is always well formed.
+  A confirmed call whose run stopped before its result was saved (a timeout or a
+  crash while the tool ran) is never run again: the next run shows it to the model
+  as ToolError `internal` ("interrupted: it may have run"), because its side effect
+  may have happened.
 
 - B-0008: With `LLM_REQUESTS_PER_MINUTE` = N, each model built by
   `build_chat_model()` starts its calls at least 60/N seconds apart, with no
@@ -103,6 +108,11 @@ All use a scripted fake model (SPEC-0005).
   apart with no burst, and without the setting a model with no pacing; no network
   calls.
   -> `tests/test_settings.py::test_provider_rate_limit`
+- AT-0012 (B-0005, B-0007): add_note requested and confirmed, with the note write
+  slowed past `RUN_TIMEOUT_SECONDS` → the confirm returns status="error"; the next
+  message's model call receives ToolError `internal` "interrupted: it may have run"
+  for that call, and the note file holds exactly one note.
+  -> `tests/test_confirmation.py::test_interrupted_confirmation_not_rerun`
 
 ## Non-goals
 Multi-agent routing, streaming, model fallback between providers, a base URL
