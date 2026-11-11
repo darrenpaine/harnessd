@@ -1,12 +1,14 @@
 """Confirmation before side-effecting tools (SPEC-0001 B-0005, SPEC-0003 B-0004)."""
 
+import asyncio
+import dataclasses
 from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from agent.agent_threads import ConfirmationStateError
-from agent_support import Agent, fetch, note, tool_turn
+from agent_support import Agent, fetch, note, slow_note_writes, tool_turn
 from schemas import AddNoteCall
 from tools.base import ToolContext
 
@@ -110,3 +112,28 @@ async def test_confirm_state_rules(tool_context: ToolContext) -> None:
     fresh = Agent(tool_context, [])
     with pytest.raises(ConfirmationStateError):
         await fresh.run(confirm=True)
+
+
+@pytest.mark.spec("SPEC-0001", "B-0005", "B-0007", "AT-0012")
+async def test_interrupted_confirmation_not_rerun(
+    tool_context: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = tool_context.settings.model_copy(update={"run_timeout_seconds": 0.2})
+    ctx = dataclasses.replace(tool_context, settings=settings)
+    agent = Agent(ctx, [tool_turn(note("once")), AIMessage(content="it may be saved")])
+    slow_note_writes(monkeypatch, 0.5)
+    paused = await agent.run(message="note: once")
+
+    timed_out = await agent.run(thread_id=paused.thread_id, confirm=True)
+    await asyncio.sleep(0.5)  # the write finishes after the run has ended
+
+    assert timed_out.status == "error"
+    assert len(notes(ctx)) == 1
+
+    done = await agent.run(thread_id=paused.thread_id, message="did it work?")
+
+    assert done.status == "ok"
+    [result] = agent.tool_results(1)
+    assert '"code":"internal"' in str(result.content).replace(" ", "")
+    assert "interrupted: it may have run" in str(result.content)
+    assert len(notes(ctx)) == 1

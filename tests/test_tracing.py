@@ -174,7 +174,7 @@ async def test_confirmation_spans(
     approved = one(resumed_spans, "agent.confirm")
     assert approved.attributes is not None
     assert approved.attributes["decision"] == "approved"
-    assert parent(resumed_spans, one(resumed_spans, "agent.tool add_note")) == "confirm"
+    assert parent(resumed_spans, one(resumed_spans, "agent.tool add_note")) == "act"
 
 
 @pytest.mark.spec("SPEC-0010", "B-0002", "AT-0003")

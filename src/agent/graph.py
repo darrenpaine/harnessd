@@ -32,6 +32,11 @@ from tools.base import Tool, ToolContext
 from tracing import confirm_span
 
 NOT_RUN = ToolError(code="internal", message="not run: the earlier run ended first")
+# A confirmed call whose run stopped while its tool ran (SPEC-0001 B-0007).
+INTERRUPTED = ToolError(
+    code="internal",
+    message="interrupted: it may have run; check before trying it again",
+)
 
 log = get_logger("graph")
 
@@ -57,6 +62,29 @@ class RunCounters(TypedDict):
     outcome: Outcome | None
 
 
+def fresh_counters(max_tool_calls: int) -> RunCounters:
+    """The counters a request starts with."""
+    return RunCounters(
+        max_tool_calls=max_tool_calls,
+        calls_used=0,
+        run_tokens=0,
+        run_estimated=False,
+        run_cost=0,
+        trace=[],
+        outcome=None,
+    )
+
+
+class Decision(TypedDict):
+    """What a confirmation resumes the graph with. The request's counter reset
+    travels here and the `confirm` step applies it: sent as `Command(update=…)`
+    it would be saved before the step runs, and left behind if the step never
+    finished (SPEC-0004 B-0007)."""
+
+    approved: bool
+    max_tool_calls: int
+
+
 class RunInput(RunCounters):
     """What a new message starts a run with; it never carries the summary."""
 
@@ -70,6 +98,9 @@ class AgentState(RunInput):
     summary: NotRequired[str | None]  # written by compaction (SPEC-0009 B-0004)
     # Tokens since the last compaction (SPEC-0012 B-0014); absent counts as 0.
     thread_tokens: NotRequired[int]
+    # Ids of approved calls whose result is not saved yet. One still here on a
+    # later run was interrupted while its tool ran (SPEC-0001 B-0007).
+    confirmed: NotRequired[list[str]]
 
 
 AgentGraph = CompiledStateGraph[AgentState, None, RunInput]
@@ -103,23 +134,31 @@ def _portable(schema: Any) -> Any:
     return schema
 
 
-def answer_dangling_calls(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
-    """Add a "not run" result for tool calls nobody answered (SPEC-0001 B-0007).
+def answer_dangling_calls(
+    messages: Sequence[BaseMessage], confirmed: Sequence[str] = ()
+) -> list[BaseMessage]:
+    """Add a result for tool calls nobody answered (SPEC-0001 B-0007): "not
+    run", or "interrupted" for a call in `confirmed`, which may have run.
 
     A truncated or timed-out run leaves calls without results, which providers
     reject. The fix is applied to the prompt only; the saved history is unchanged.
     """
+
+    def result(call_id: str) -> BaseMessage:
+        error = INTERRUPTED if call_id in confirmed else NOT_RUN
+        return tool_message(error, call_id)
+
     answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
     repaired: list[BaseMessage] = []
     missing: list[str] = []
     for message in messages:
         if missing and not isinstance(message, ToolMessage):
-            repaired.extend(tool_message(NOT_RUN, call_id) for call_id in missing)
+            repaired.extend(result(call_id) for call_id in missing)
             missing = []
         repaired.append(message)
         if isinstance(message, AIMessage):
             missing = [c for c in _call_ids(message) if c not in answered]
-    repaired.extend(tool_message(NOT_RUN, call_id) for call_id in missing)
+    repaired.extend(result(call_id) for call_id in missing)
     return repaired
 
 
@@ -138,8 +177,12 @@ def build_prompt(state: AgentState) -> list[BaseMessage]:
         system += f"\n\nSummary of the earlier conversation: {summary}"
     return [
         SystemMessage(content=system),
-        *answer_dangling_calls(state["messages"]),
+        *answer_dangling_calls(state["messages"], state.get("confirmed", ())),
     ]
+
+
+def _ids(call: ToolCall) -> list[str]:
+    return [call["id"]] if call["id"] else []
 
 
 def _call_ids(message: AIMessage) -> list[str]:
@@ -313,29 +356,49 @@ def build_graph(
         return Command(update=update, goto="confirm" if queue else "model")
 
     async def confirm(state: AgentState) -> Command[str]:
-        """Pause for a human decision, then run or reject the call (B-0005)."""
+        """Pause for a human decision, then reject the call or save the approval
+        for `act` (B-0005). The approval is saved before the tool runs, so a run
+        that stops part way never runs it twice (SPEC-0004 B-0007)."""
         _step("confirm")
         call, *rest = state["queue"]
         pending = calls.pending_action(call)
         with confirm_span(pending.tool) as span:
             try:
-                approved = interrupt(pending.model_dump(mode="json"))
+                decision: Decision = interrupt(pending.model_dump(mode="json"))
             except GraphInterrupt:
                 span.set_attribute("decision", "awaiting")
                 raise
-            span.set_attribute(
-                "decision", "approved" if approved is True else "rejected"
-            )
-        settled = await calls.run(call) if approved is True else calls.reject(call)
+            approved = decision["approved"] is True
+            span.set_attribute("decision", "approved" if approved else "rejected")
+        fresh = fresh_counters(decision["max_tool_calls"])
+        if approved:
+            confirmed = [*state.get("confirmed", []), *_ids(call)]
+            return Command(update={**fresh, "confirmed": confirmed}, goto="act")
+        settled = calls.reject(call)
+        trace = [settled.record] if settled.record is not None else []
+        update = {**fresh, "messages": [settled.message], "trace": trace, "queue": rest}
+        return Command(update=update, goto="tools" if rest else "model")
+
+    async def act(state: AgentState) -> Command[str]:
+        """Run the call `confirm` approved (B-0005)."""
+        _step("act")
+        call, *rest = state["queue"]
+        settled = await calls.run(call)
         trace = list(state["trace"])
         if settled.record is not None:
             trace.append(settled.record)
-        update = {"messages": [settled.message], "trace": trace, "queue": rest}
+        update = {
+            "messages": [settled.message],
+            "trace": trace,
+            "queue": rest,
+            "confirmed": [i for i in state.get("confirmed", []) if i != call["id"]],
+        }
         return Command(update=update, goto="tools" if rest else "model")
 
     graph = StateGraph(AgentState, input_schema=RunInput)
     graph.add_node("model", call_model, destinations=("tools", END))
     graph.add_node("tools", run_tools, destinations=("model", "confirm"))
-    graph.add_node("confirm", confirm, destinations=("model", "tools"))
+    graph.add_node("confirm", confirm, destinations=("model", "tools", "act"))
+    graph.add_node("act", act, destinations=("model", "tools"))
     graph.add_edge(START, "model")
     return graph.compile(checkpointer=checkpointer)

@@ -27,7 +27,7 @@ from agent.persistence import (
     thread_lock,
     ttl_seconds,
 )
-from agent_support import Agent, MakeClient, note, tool_turn
+from agent_support import Agent, MakeClient, note, slow_note_writes, tool_turn
 from fakes import ScriptedChatModel
 from settings import Settings
 from tools.base import ToolContext
@@ -224,3 +224,47 @@ async def test_repeated_confirmations(
     assert rejected["error"]["code"] == "rejected", PRIVATE_API_HINT
     lines = agent_settings.notes_path.read_text().splitlines()
     assert [line.split("\t")[-1] for line in lines] == ["one", "two"]
+
+
+@pytest.mark.spec("SPEC-0004", "B-0007", "AT-0007")
+async def test_interrupted_confirmation(
+    settings: Settings,
+    redis: Redis,
+    tool_context: ToolContext,
+    make_client: MakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent_settings = tool_context.settings.model_copy(
+        update={"redis_url": settings.redis_url, "run_timeout_seconds": 0.5}
+    )
+    ctx = dataclasses.replace(tool_context, settings=agent_settings)
+    guard = RedisThreadGuard(redis, agent_settings)
+    replies = [tool_turn(note("once")), AIMessage(content="it may be saved")]
+    thread_id = str(uuid.uuid4())
+    slow_note_writes(monkeypatch, 1)
+
+    async with open_checkpointer(agent_settings) as saver:
+        client, _ = make_client(replies, ctx=ctx, checkpointer=saver, guard=guard)
+
+        async def send(body: dict[str, Any]) -> httpx.Response:
+            response = await client.post(
+                "/v1/agent/run", json={"thread_id": thread_id, **body}
+            )
+            state = await client.get(f"/v1/threads/{thread_id}")
+            assert state.status_code == 200, state.text
+            return response
+
+        paused = await send({"message": "note: once"})
+        timed_out = await send({"confirm": True})
+        thread = (await client.get(f"/v1/threads/{thread_id}")).json()
+        await asyncio.sleep(1)  # the write finishes after the run has ended
+        again = await send({"confirm": True})
+        done = await send({"message": "did it work?"})
+
+    assert paused.json()["status"] == "awaiting_confirmation"
+    assert timed_out.json()["status"] == "error"
+    assert thread["status"] == "unfinished"
+    assert thread["pending_action"] is None
+    assert again.status_code == 422
+    assert done.json()["status"] == "ok"
+    assert len(agent_settings.notes_path.read_text().splitlines()) == 1
