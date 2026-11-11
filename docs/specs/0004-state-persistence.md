@@ -1,6 +1,6 @@
 # SPEC-0004: State and persistence
 
-Status: reviewed
+Status: implemented
 Requirements: R-0005, R-0006, R-0013
 Design: [design.md](../design/design.md)
 
