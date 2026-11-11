@@ -9,10 +9,11 @@ import logging
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import pytest
+import redis.exceptions
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -24,6 +25,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from pydantic import SecretStr
 
 import api.deps
+from agent.metered import MeteredModel
 from agent.redact import REDACTED, Redactor
 from agent.screen import (
     PRELOAD_TIMEOUT_SECONDS,
@@ -33,6 +35,7 @@ from agent.screen import (
     build_screen,
     preload,
 )
+from agent.spend import DailySpend
 from agent_support import (
     PAGE_TEXT,
     Agent,
@@ -485,6 +488,53 @@ async def test_screen_failure_modes(
     assert warning.getMessage().startswith("screen.failed ")
     assert "on_error=allow" in warning.getMessage()
     assert PAGE_TEXT not in warning.getMessage()
+
+
+class DownSpendStore:
+    """A spend store whose Redis is unreachable."""
+
+    async def total(self, key: str) -> int:
+        raise redis.exceptions.ConnectionError("redis is down")
+
+    async def add(self, key: str, micro_usd: int) -> int:
+        raise redis.exceptions.ConnectionError("redis is down")
+
+
+@pytest.mark.spec("SPEC-0012", "B-0006", "B-0010", "AT-0016")
+@pytest.mark.parametrize("on_error", ["withhold", "allow"])
+async def test_chat_screen_redis_error_is_503(
+    make_client: MakeClient,
+    tool_context: ToolContext,
+    capture: Capture,
+    caplog: pytest.LogCaptureFixture,
+    on_error: Literal["withhold", "allow"],
+) -> None:
+    """A Redis error while the chat screen's cost is added is a 503, whatever
+    INJECTION_SCREEN_ON_ERROR says: it is not a screen failure."""
+    capture("info")
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        llm_provider="google",
+        llm_model="gemini-3.5-flash-lite",
+        google_api_key=SecretStr("test-key"),
+        daily_cost_limit_usd=1,
+        injection_screen_on_error=on_error,
+        notes_path=tool_context.settings.notes_path,
+    )
+    ctx = dataclasses.replace(tool_context, settings=settings)
+    verdict = ScriptedChatModel(replies=[AIMessage(content='{"probability": 0.1}')])
+    spend = DailySpend(DownSpendStore(), settings)
+    screen = ChatScreen(MeteredModel(verdict, settings, spend))
+    client, agent = make_client(read_turns(), ctx=ctx, screen=screen)
+
+    response = await client.post("/v1/agent/run", json={"message": "read it"})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "dependency_unavailable"
+    assert len(verdict.calls) == 1  # the screen's model call was made
+    assert len(agent.model.calls) == 1  # the result never reached the model
+    messages = [record.getMessage() for record in caplog.records]
+    assert not [m for m in messages if m.startswith(("screen.failed ", "guard "))]
 
 
 def _screen_settings(**values: Any) -> Settings:

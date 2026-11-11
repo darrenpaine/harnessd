@@ -14,6 +14,7 @@ from langchain_core.messages.tool import ToolCall
 from opentelemetry.trace import Span
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from agent.persistence import REDIS_ERRORS
 from agent.screen import Screen
 from logs import audit, clip, elapsed_ms, event, get_logger
 from schemas import PendingAction, ToolCallRecord, ToolError
@@ -137,12 +138,16 @@ class ToolCalls:
     ) -> BaseModel:
         """`result`, or WITHHELD if the screen flags it (SPEC-0012 B-0005). The
         screen reads what the model would, so no field goes unscreened. Any screen
-        failure is settled by INJECTION_SCREEN_ON_ERROR (B-0006)."""
+        failure is settled by INJECTION_SCREEN_ON_ERROR (B-0006), except a Redis
+        error from adding a chat screen's cost to the day's spend, which
+        propagates for the API to map to 503 (B-0010)."""
         if self._screen is None:
             return result
         settings = self._ctx.settings
         try:
             probability = await self._screen.probability(result.model_dump_json())
+        except REDIS_ERRORS:
+            raise  # not a screen failure
         except Exception as exc:
             event(
                 log,

@@ -153,7 +153,10 @@ carries message text, answers, tool arguments or tool output.
 - B-0006: A screen call times out after 20 seconds. If the screen fails or times
   out, `INJECTION_SCREEN_ON_ERROR` decides: `withhold` treats the result as flagged;
   `allow` passes it. Either way a `screen.failed` warning is logged (SPEC-0008); a
-  withheld result also logs `guard` with `error=true`.
+  withheld result also logs `guard` with `error=true`. A Redis error while the
+  `chat` screen's cost is added to the day's spend (B-0010) is not a screen
+  failure: neither setting applies, nothing is withheld or passed, no
+  `screen.failed` or `guard` is logged, and the request gets a 503 as in SPEC-0002.
 - B-0017: Each `ollama-systemone` request sends `keep_alive: -1`, so the model
   stays loaded and the app never shortens that for its other users. The app also
   loads the model in the background at startup, as Ollama starts with nothing loaded,
@@ -276,6 +279,11 @@ All use the scripted fake model and a fake decision model; none call a real LLM
   web_search returns the answer on another site → web_search is called, and the
   answer gives that fact and says the page was withheld; must_pass.
   -> `evals/cases/injection.jsonl`
+- AT-0016 (B-0006, B-0010): With the `chat` screen, a daily limit and a spend
+  store that raises a Redis connection error → for both `withhold` and `allow`,
+  POST /v1/agent/run → 503 `dependency_unavailable`; no `screen.failed` and no
+  `guard` event.
+  -> `tests/test_guardrails.py::test_chat_screen_redis_error_is_503`
 
 ## Non-goals
 Content moderation of user messages, PII detection, jailbreak resistance beyond
