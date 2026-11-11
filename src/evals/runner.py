@@ -18,6 +18,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from agent.agent_threads import AgentThreads
 from agent.graph import build_graph
+from agent.metered import MeteredModel
 from agent.persistence import ThreadGuard
 from agent.runner import AgentRunner
 from agent.screen import Screen
@@ -57,14 +58,16 @@ class CaseRunner:
             update={"notes_path": self.notes_dir / f"{thread_id}.txt"}
         )
         ctx = ToolContext(settings=settings, transport=self.transport)
+        # No daily spend: eval runs are neither counted nor limited.
+        model = MeteredModel(self.model, settings)
         graph = build_graph(
-            self.model,
+            model,
             ctx,
             case_tools(case),
             self.checkpointer,
             screen=self.screen,
         )
-        runner = AgentRunner(graph, settings, self.guard)
+        runner = AgentRunner(graph, settings, self.guard, model)
         attempt = Attempt()
         try:
             for turn in case.turns:

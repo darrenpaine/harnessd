@@ -22,8 +22,8 @@ from agent.persistence import (
     open_checkpointer,
     ttl_seconds,
 )
-from agent_support import Capture, MakeClient, fetch, note, tool_turn
-from api.deps import get_model
+from agent_support import Capture, MakeClient, fetch, metered, note, tool_turn
+from api.deps import get_metered
 from app import app
 from fakes import RaisingChatModel, ScriptedChatModel
 from logs import ROOT
@@ -231,8 +231,8 @@ async def test_busy_thread_409(make_client: MakeClient) -> None:
 async def test_run_during_compaction_409(make_client: MakeClient) -> None:
     client, agent = make_client(replies("a", "b"))
     thread_id = await turns(client, "one", "two")
-    app.dependency_overrides[get_model] = lambda: ScriptedChatModel(
-        replies=replies("summary"), delay=0.2
+    app.dependency_overrides[get_metered] = lambda: metered(
+        ScriptedChatModel(replies=replies("summary"), delay=0.2)
     )
 
     compact = asyncio.create_task(
@@ -386,7 +386,7 @@ async def test_compact_failure_leaves_state(
         model = RaisingChatModel(error=ModelRateLimitError("slow down"))
     else:
         model = ScriptedChatModel(replies=replies(""))
-    app.dependency_overrides[get_model] = lambda: model
+    app.dependency_overrides[get_metered] = lambda: metered(model)
 
     response = await client.post(thread(thread_id, "/compact"), json={"keep_turns": 1})
 

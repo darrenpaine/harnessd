@@ -1,6 +1,6 @@
 """Shared services and the FastAPI dependencies routes use (SPEC-0002).
 
-Tests replace `get_graph`, `get_guard`, `get_model` and `get_spend` through
+Tests replace `get_graph`, `get_guard` and `get_metered` through
 `app.dependency_overrides`.
 """
 
@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 
 from agent.graph import AgentGraph, build_graph
 from agent.llm import build_chat_model
+from agent.metered import MeteredModel
 from agent.persistence import (
     REDIS_ERRORS,
     RedisThreadGuard,
@@ -46,6 +47,7 @@ class Services:
         self._lock = asyncio.Lock()
         self._redis: Redis | None = None
         self._model: BaseChatModel | None = None
+        self._metered: MeteredModel | None = None
         self._graph: AgentGraph | None = None
         self._screen: Screen | None = None
         self._screen_built = False
@@ -64,6 +66,15 @@ class Services:
         """The day's spend, or None with no daily limit (SPEC-0012 B-0010)."""
         return build_spend(self.redis(settings), settings)
 
+    def metered(self, settings: Settings) -> MeteredModel:
+        """The agent's metered model: every call through it is counted, priced
+        and added to the day's spend (SPEC-0012 B-0010)."""
+        if self._metered is None:
+            self._metered = MeteredModel(
+                self.model(settings), settings, self.spend(settings)
+            )
+        return self._metered
+
     def screen(self, settings: Settings) -> Screen | None:
         """The injection screen, or None when it is off (SPEC-0012 B-0005)."""
         if not self._screen_built:
@@ -78,12 +89,11 @@ class Services:
                     open_checkpointer(settings)
                 )
                 self._graph = build_graph(
-                    self.model(settings),
+                    self.metered(settings),
                     ToolContext(settings=settings),
                     TOOLS,
                     saver,
                     screen=self.screen(settings),
-                    spend=self.spend(settings),
                 )
             return self._graph
 
@@ -117,10 +127,11 @@ async def get_graph(request: Request, settings: SettingsDep) -> AgentGraph:
     return await services.graph(settings)
 
 
-def get_model(request: Request, settings: SettingsDep) -> BaseChatModel:
-    """The chat model, for calls outside the graph such as compaction."""
+def get_metered(request: Request, settings: SettingsDep) -> MeteredModel:
+    """The agent's metered model, also used for calls outside the graph such as
+    compaction; tests override this (SPEC-0012 B-0010)."""
     services: Services = request.app.state.services
-    return services.model(settings)
+    return services.metered(settings)
 
 
 def get_guard(request: Request, settings: SettingsDep) -> ThreadGuard:
@@ -128,29 +139,22 @@ def get_guard(request: Request, settings: SettingsDep) -> ThreadGuard:
     return RedisThreadGuard(services.redis(settings), settings)
 
 
-def get_spend(request: Request, settings: SettingsDep) -> DailySpend | None:
-    """The day's spend; tests override this (SPEC-0012 B-0010)."""
-    services: Services = request.app.state.services
-    return services.spend(settings)
-
-
-SpendDep = Annotated[DailySpend | None, Depends(get_spend)]
+MeteredDep = Annotated[MeteredModel, Depends(get_metered)]
 
 
 def get_runner(
     graph: Annotated[AgentGraph, Depends(get_graph)],
     guard: Annotated[ThreadGuard, Depends(get_guard)],
     settings: SettingsDep,
-    spend: SpendDep,
+    model: MeteredDep,
 ) -> AgentRunner:
-    return AgentRunner(graph, settings, guard, spend)
+    return AgentRunner(graph, settings, guard, model)
 
 
 def get_threads(
     graph: Annotated[AgentGraph, Depends(get_graph)],
-    model: Annotated[BaseChatModel, Depends(get_model)],
+    model: MeteredDep,
     guard: Annotated[ThreadGuard, Depends(get_guard)],
     settings: SettingsDep,
-    spend: SpendDep,
 ) -> ThreadService:
-    return ThreadService(graph, model, settings, guard, spend)
+    return ThreadService(graph, model, settings, guard)

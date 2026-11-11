@@ -11,11 +11,10 @@ import logging
 from typing import Protocol
 
 import httpx
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.budgets import call_tokens
 from agent.llm import build_chat_model
+from agent.metered import MeteredModel
 from agent.spend import DailySpend
 from logs import event, get_logger
 from prompts import INJECTION_SCREEN_CHAT_PROMPT, INJECTION_SCREEN_PROMPT
@@ -87,26 +86,19 @@ class ChatScreen:
 
     def __init__(
         self,
-        model: BaseChatModel,
+        model: MeteredModel,
         *,
         timeout_seconds: float = TIMEOUT_SECONDS,
-        spend: DailySpend | None = None,
-        model_name: str = "",
     ) -> None:
         self._model = model
         self._timeout = timeout_seconds
-        self._spend = spend
-        self._model_name = model_name
 
     async def probability(self, text: str) -> float:
         prompt = f"{INJECTION_SCREEN_PROMPT}\n\n{INJECTION_SCREEN_CHAT_PROMPT}"
         messages = [SystemMessage(content=prompt), HumanMessage(content=text)]
         async with asyncio.timeout(self._timeout):
-            reply = await self._model.ainvoke(messages)
-        if self._spend is not None:  # SPEC-0012 B-0010
-            assert isinstance(reply, AIMessage)
-            await self._spend.add(self._model_name, call_tokens(messages, reply))
-        return ChatScreenReply.model_validate_json(str(reply.text)).probability
+            result = await self._model.call(messages)  # SPEC-0012 B-0010
+        return ChatScreenReply.model_validate_json(str(result.reply.text)).probability
 
 
 async def preload(screen: Screen | None) -> None:
@@ -133,4 +125,4 @@ def build_screen(settings: Settings, spend: DailySpend | None = None) -> Screen 
             return SystemOneScreen(settings.ollama_base_url, model)
         case "chat":
             chat = settings.model_copy(update={"llm_model": model})
-            return ChatScreen(build_chat_model(chat), spend=spend, model_name=model)
+            return ChatScreen(MeteredModel(build_chat_model(chat), chat, spend))

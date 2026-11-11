@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -22,10 +21,9 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 
-from agent.budgets import BudgetStop, call_tokens, over_budget
-from agent.prices import cost_micro_usd, price_of
+from agent.budgets import BudgetStop, over_budget
+from agent.metered import MeteredModel
 from agent.screen import Screen
-from agent.spend import DailySpend
 from agent.tool_calls import ToolCalls, Tools, tool_message
 from logs import elapsed_ms, event, get_logger
 from prompts import SYSTEM_PROMPT
@@ -216,23 +214,20 @@ def _step(node: str) -> None:
 
 
 def build_graph(
-    model: BaseChatModel,
+    model: MeteredModel,
     ctx: ToolContext,
     tools: Tools,
     checkpointer: BaseCheckpointSaver[Any],
     *,
     screen: Screen | None = None,
-    spend: DailySpend | None = None,
 ) -> AgentGraph:
-    """Compile the agent loop with its checkpointer. `screen` is the injection
-    screen, or None when it is off (SPEC-0012 B-0005); `spend` is the day's spend,
-    or None when there is no daily limit (B-0010)."""
-    bound = model.bind_tools([tool_schema(tool) for tool in tools.values()])
+    """Compile the agent loop with its checkpointer. `model` counts and prices
+    each call and holds the daily cost limit (SPEC-0012 B-0010); `screen` is the
+    injection screen, or None when it is off (B-0005)."""
+    bound = model.with_tools([tool_schema(tool) for tool in tools.values()])
     calls = ToolCalls(tools, ctx, screen)
     max_run = ctx.settings.max_tokens_per_run
     max_thread = ctx.settings.max_tokens_per_thread
-    model_name = ctx.settings.llm_model
-    price = price_of(ctx.settings.llm_provider, model_name)
 
     async def call_model(state: AgentState) -> Command[str]:
         """One model turn, unless a token budget or the daily cost limit is used
@@ -243,22 +238,18 @@ def build_graph(
         thread_tokens = state.get("thread_tokens", 0)
         if stop := over_budget(run_tokens, thread_tokens, max_run, max_thread):
             return Command(update={"outcome": _budget_outcome(stop)}, goto=END)
-        if spend is not None and (stop := await spend.stop()):
+        if stop := await bound.day_stop():
             return Command(update={"outcome": _budget_outcome(stop)}, goto=END)
         started = time.perf_counter()
-        prompt = build_prompt(state)
-        reply = await bound.ainvoke(prompt)
-        assert isinstance(reply, AIMessage)
-        tokens = call_tokens(prompt, reply)
-        day_stop = await spend.add(model_name, tokens) if spend is not None else None
-        cost = cost_micro_usd(price, tokens.input, tokens.output) if price else 0
+        result = await bound.call(build_prompt(state))
+        reply, tokens = result.reply, result.tokens
         counts = {
             "run_tokens": run_tokens + tokens.count,
             "thread_tokens": thread_tokens + tokens.count,
         }
         usage = {
             "run_estimated": state["run_estimated"] or tokens.estimated,
-            "run_cost": state["run_cost"] + cost,
+            "run_cost": state["run_cost"] + result.cost_micro_usd,
         }
         requested = len(reply.tool_calls) + len(reply.invalid_tool_calls)
         event(
@@ -287,7 +278,7 @@ def build_graph(
                 )
             case RunCalls(invalid):
                 stop = over_budget(**counts, max_run=max_run, max_thread=max_thread)
-                if stop := stop or day_stop:
+                if stop := stop or result.day_stop:
                     return Command(
                         update={
                             "messages": [reply],

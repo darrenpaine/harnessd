@@ -15,10 +15,10 @@ from opentelemetry.trace import Span, StatusCode
 from agent.agent_threads import AgentThreads, PreparedRun, RunResult
 from agent.budgets import RunUsage
 from agent.graph import AgentGraph
+from agent.metered import MeteredModel
 from agent.persistence import ThreadGuard
-from agent.prices import MICRO_USD, price_of
+from agent.prices import MICRO_USD
 from agent.redact import Redactor
-from agent.spend import DailySpend
 from logs import audit, elapsed_ms, log_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo
 from settings import Settings
@@ -31,14 +31,15 @@ class AgentRunner:
         graph: AgentGraph,
         settings: Settings,
         guard: ThreadGuard,
-        spend: DailySpend | None = None,
+        model: MeteredModel,
     ) -> None:
+        """`model` is the graph's metered model: the runner asks it for the
+        daily cost limit and whether costs can be reported, and never calls it."""
         self.threads = AgentThreads(graph)
         self.settings = settings
         self.guard = guard
-        self.spend = spend
+        self.model = model
         self.redactor = Redactor(settings)
-        self.priced = price_of(settings.llm_provider, settings.llm_model) is not None
 
     async def run(self, request: AgentRequest) -> AgentResponse:
         """Run a request to its end. Raises DailyLimitError, ThreadBusyError and
@@ -63,8 +64,7 @@ class AgentRunner:
             return response
 
     async def _run(self, request: AgentRequest, thread_id: UUID) -> RunResult:
-        if self.spend is not None:  # SPEC-0012 B-0010, before the lock
-            await self.spend.refuse_if_reached()
+        await self.model.refuse_if_reached()  # SPEC-0012 B-0010, before the lock
         async with self.guard.hold(str(thread_id)):
             run = await self._prepare(request, thread_id)
             try:
@@ -133,7 +133,7 @@ class AgentRunner:
         SPEC-0012 B-0013). cost_usd is left out when the model has no price."""
         if response.pending_action is not None:
             audit("confirm.wait", tool=response.pending_action.tool)
-        cost = usage.cost_micro_usd / MICRO_USD if self.priced else None
+        cost = usage.cost_micro_usd / MICRO_USD if self.model.priced else None
         audit(
             "run.end",
             status=response.status,

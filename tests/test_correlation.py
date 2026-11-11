@@ -18,6 +18,7 @@ from agent_support import (
     StartTracing,
     fetch,
     finished_spans,
+    metered,
     tool_turn,
 )
 from api.deps import get_graph
@@ -69,7 +70,7 @@ async def test_request_id(
 
     # A 500 carries the id, and so does its request.failed line.
     graph = build_graph(
-        RaisingChatModel(error=RuntimeError("boom")),
+        metered(RaisingChatModel(error=RuntimeError("boom"))),
         tool_context,
         TOOLS,
         InMemorySaver(),

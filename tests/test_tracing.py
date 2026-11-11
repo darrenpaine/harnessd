@@ -27,6 +27,7 @@ from agent_support import (
     StartTracing,
     fetch,
     finished_spans,
+    metered,
     note,
     tool_turn,
 )
@@ -198,7 +199,7 @@ async def test_failures_recorded(
 
     # The provider is down: 503.
     down = RaisingChatModel(error=httpx.ConnectError("refused"))
-    graph = build_graph(down, tool_context, TOOLS, InMemorySaver())
+    graph = build_graph(metered(down), tool_context, TOOLS, InMemorySaver())
     app.dependency_overrides[get_graph] = lambda: graph
     unavailable = await client.post(RUN, json={"message": "hi"})
     spans = finished_spans(tracing, exporter)

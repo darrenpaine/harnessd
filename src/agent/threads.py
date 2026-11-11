@@ -11,7 +11,6 @@ import time
 from collections.abc import Sequence
 from uuid import UUID
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -21,11 +20,10 @@ from langchain_core.messages import (
 )
 
 from agent.agent_threads import AgentThreads
-from agent.budgets import call_tokens
 from agent.graph import AgentGraph
+from agent.metered import MeteredModel
 from agent.persistence import ThreadGuard
 from agent.redact import Redactor
-from agent.spend import DailySpend
 from logs import elapsed_ms, event, get_logger, log_context
 from prompts import SUMMARY_PROMPT
 from schemas import (
@@ -61,16 +59,14 @@ class ThreadService:
     def __init__(
         self,
         graph: AgentGraph,
-        model: BaseChatModel,
+        model: MeteredModel,
         settings: Settings,
         guard: ThreadGuard,
-        spend: DailySpend | None = None,
     ) -> None:
         self.threads = AgentThreads(graph)
         self.model = model
         self.settings = settings
         self.guard = guard
-        self.spend = spend
         self.redactor = Redactor(settings)
 
     async def read(self, thread_id: UUID) -> ThreadState:
@@ -112,8 +108,7 @@ class ThreadService:
             thread_span("thread.compact", thread_id, keep_turns=keep_turns) as span,
         ):
             started = time.perf_counter()
-            if self.spend is not None:  # SPEC-0012 B-0010, before the lock
-                await self.spend.refuse_if_reached()
+            await self.model.refuse_if_reached()  # SPEC-0012 B-0010, before the lock
             async with self.guard.hold(str(thread_id)):
                 state = await self._state(thread_id)
                 if state.status == "awaiting_confirmation":
@@ -162,19 +157,16 @@ class ThreadService:
         limit = self.settings.run_timeout_seconds
         try:
             async with asyncio.timeout(limit):
-                reply = await self.model.ainvoke(prompt)
+                # SPEC-0012 B-0010: the call's cost is added, used or not.
+                result = await self.model.call(prompt)
         except TimeoutError as exc:
             _summary_failed("timeout")
             raise SummaryError(f"the summary took longer than {limit:g} s") from exc
-        assert isinstance(reply, AIMessage)
-        tokens = call_tokens(prompt, reply)
-        if self.spend is not None:  # SPEC-0012 B-0010: the call cost, used or not
-            await self.spend.add(self.settings.llm_model, tokens)
-        text = str(reply.text).strip()
+        text = str(result.reply.text).strip()
         if not text:
             _summary_failed("empty")
             raise SummaryError("the model returned an empty summary")
-        return text, tokens.output
+        return text, result.tokens.output
 
 
 def _summary_failed(reason: str) -> None:
