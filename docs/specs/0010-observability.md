@@ -59,8 +59,10 @@ POST /v1/agent/run              server span (FastAPI instrumentation); request_i
       │                         completion / total, input and output messages
       ├─ tools                  tools node (CHAIN)
       │  └─ agent.tool <name>   call_id, result (ok | ToolError code); input and output
-      └─ confirm                confirm node (CHAIN)
-         └─ agent.confirm       tool, decision (awaiting | approved | rejected)
+      ├─ confirm                confirm node (CHAIN)
+      │  └─ agent.confirm       tool, decision (awaiting | approved | rejected)
+      └─ act                    act node (CHAIN): runs an approved call
+         └─ agent.tool <name>   as under tools
 ```
 - Spans named `agent.*` are ours; `LangGraph`, the node spans and the LLM span come
   from OpenInference, so their names follow the graph and the chat model class.
