@@ -18,7 +18,7 @@ from langgraph.types import Command, StateSnapshot
 from pydantic import TypeAdapter
 
 from agent.budgets import RunUsage
-from agent.graph import AgentGraph, RunCounters, RunInput
+from agent.graph import AgentGraph, Decision, RunInput, fresh_counters
 from schemas import (
     AgentResponse,
     AgentThreadState,
@@ -106,7 +106,7 @@ class AgentThreads:
             messages=[HumanMessage(content=text)],
             queue=[],
             invalid_turns=0,
-            **_counters(max_tool_calls),
+            **fresh_counters(max_tool_calls),
         )
         return PreparedRun(thread_id, None, self.graph, graph_input, stripped)
 
@@ -118,9 +118,10 @@ class AgentThreads:
         pending = _pending(await self._snapshot(thread_id))
         if pending is None:
             raise ConfirmationStateError("nothing is awaiting confirmation")
-        # The paused call and its queue carry over; the counters are new.
-        fresh = _counters(max_tool_calls)
-        command: Command[Any] = Command(resume=approved, update=fresh)
+        # The paused call and its queue carry over; the `confirm` step resets
+        # the counters from the decision.
+        decision = Decision(approved=approved, max_tool_calls=max_tool_calls)
+        command: Command[Any] = Command(resume=decision)
         return PreparedRun(thread_id, pending, self.graph, command)
 
     async def tool_calls(self, thread_id: UUID) -> list[ToolCallRecord]:
@@ -167,19 +168,6 @@ class AgentThreads:
 def _config(thread_id: UUID) -> RunnableConfig:
     """Selects a thread's checkpoint, so runs and reads see the same state."""
     return {"configurable": {"thread_id": str(thread_id)}}
-
-
-def _counters(max_tool_calls: int) -> RunCounters:
-    """The state reset at the start of every request."""
-    return RunCounters(
-        max_tool_calls=max_tool_calls,
-        calls_used=0,
-        run_tokens=0,
-        run_estimated=False,
-        run_cost=0,
-        trace=[],
-        outcome=None,
-    )
 
 
 def _pending(snapshot: StateSnapshot) -> PendingAction | None:

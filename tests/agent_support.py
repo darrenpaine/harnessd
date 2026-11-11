@@ -2,12 +2,15 @@
 
 import asyncio
 import dataclasses
+import time
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -24,7 +27,7 @@ from agent.spend import DailySpend
 from fakes import ScriptedChatModel
 from schemas import AgentRequest, AgentResponse
 from settings import LogLevel, Settings
-from tools import TOOLS
+from tools import TOOLS, add_note
 from tools.base import ToolContext
 from tracing import Tracing
 
@@ -105,6 +108,18 @@ def fetch(path: str = "") -> tuple[str, dict[str, Any]]:
 
 def note(text: str) -> tuple[str, dict[str, Any]]:
     return ("add_note", {"text": text})
+
+
+def slow_note_writes(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    """Make add_note's file write take `seconds`. It runs in a worker thread,
+    which a timeout doesn't stop, so the note is still written."""
+    write = add_note._append
+
+    def slow(path: Path, line: str) -> None:
+        time.sleep(seconds)
+        write(path, line)
+
+    monkeypatch.setattr(add_note, "_append", slow)
 
 
 class Agent:
