@@ -20,7 +20,7 @@ from redisvl.exceptions import RedisSearchError
 
 from agent.graph import build_graph
 from agent.persistence import lock_key
-from agent_support import MakeClient, note, tool_turn
+from agent_support import MakeClient, metered, note, tool_turn
 from api.deps import Services, get_graph
 from app import app
 from fakes import RaisingChatModel
@@ -152,7 +152,7 @@ async def test_unreachable_llm_returns_503(
 ) -> None:
     client, _ = make_client([])
     model = ChatOllama(model="llama3.1", base_url="http://127.0.0.1:1")
-    graph = build_graph(model, tool_context, TOOLS, InMemorySaver())
+    graph = build_graph(metered(model), tool_context, TOOLS, InMemorySaver())
     app.dependency_overrides[get_graph] = lambda: graph
 
     response = await client.post(RUN, json={"message": "hi"})
@@ -244,7 +244,7 @@ async def test_unreachable_provider_is_not_a_rejection(
     """These subclass ModelError, but get the unreachable message, not B-0007's."""
     client, _ = make_client([])
     graph = build_graph(
-        RaisingChatModel(error=error), tool_context, TOOLS, InMemorySaver()
+        metered(RaisingChatModel(error=error)), tool_context, TOOLS, InMemorySaver()
     )
     app.dependency_overrides[get_graph] = lambda: graph
 
@@ -282,7 +282,7 @@ async def test_provider_rejection_returns_503(
 ) -> None:
     client, _ = make_client([])
     model = RaisingChatModel(error=error)
-    graph = build_graph(model, tool_context, TOOLS, InMemorySaver())
+    graph = build_graph(metered(model), tool_context, TOOLS, InMemorySaver())
     app.dependency_overrides[get_graph] = lambda: graph
 
     response = await client.post(RUN, json={"message": "hi"})
@@ -301,7 +301,7 @@ async def test_unexpected_error_returns_500(
 ) -> None:
     make_client([])  # installs the overrides; this test needs its own client
     model = RaisingChatModel(error=RuntimeError("secret detail"))
-    graph = build_graph(model, tool_context, TOOLS, InMemorySaver())
+    graph = build_graph(metered(model), tool_context, TOOLS, InMemorySaver())
     app.dependency_overrides[get_graph] = lambda: graph
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
 

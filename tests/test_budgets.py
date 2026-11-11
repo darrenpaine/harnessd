@@ -11,12 +11,12 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pytest
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import UsageMetadata
 from pydantic import SecretStr
 from redis.asyncio import Redis
 
-from agent.budgets import Tokens, call_tokens
+from agent.metered import MeteredModel, call_tokens
 from agent.prices import FREE, cost_micro_usd, price_of
 from agent.screen import ChatScreen
 from agent.spend import DailyLimitError, DailySpend, RedisSpendStore, SpendStore
@@ -25,6 +25,7 @@ from agent_support import (
     Capture,
     LocalThreadGuard,
     MakeClient,
+    MemorySpendStore,
     fetch,
     note,
     tool_turn,
@@ -185,18 +186,6 @@ DAY_KEY = "harnessd:spend:2000-01-01"
 LIMIT_MESSAGE = "the daily cost limit of $0.01 was reached; it resets at 00:00 UTC"
 
 
-class MemorySpendStore:
-    def __init__(self, totals: dict[str, int] | None = None) -> None:
-        self.totals = totals or {}
-
-    async def total(self, key: str) -> int:
-        return self.totals.get(key, 0)
-
-    async def add(self, key: str, micro_usd: int) -> int:
-        self.totals[key] = self.totals.get(key, 0) + micro_usd
-        return self.totals[key]
-
-
 class CountingGuard(LocalThreadGuard):
     """Counts the locks taken."""
 
@@ -270,8 +259,11 @@ async def test_daily_cost_limit(
 
         # Spend is added in whole micro-dollars and the day's key expires.
         await redis.delete(DAY_KEY)
-        flash = Tokens(input=1000, output=1000, estimated=False)
-        assert await spend.add("gemini-3.5-flash-lite", flash) is None
+        usage = UsageMetadata(input_tokens=1000, output_tokens=1000, total_tokens=2000)
+        reply = AIMessage(content="hi", usage_metadata=usage)
+        model = MeteredModel(ScriptedChatModel(replies=[reply]), priced.settings, spend)
+        result = await model.call([HumanMessage(content="hello")])
+        assert (result.cost_micro_usd, result.day_stop) == (2800, None)
         assert int(await redis.get(DAY_KEY) or 0) == 2800
         assert 0 < await redis.ttl(DAY_KEY) <= 48 * 3600
     finally:
@@ -333,9 +325,7 @@ async def test_compaction_and_screen_spend(
 
     reply = used(AIMessage(content='{"probability": 0.1}'), 400)
     screen = ChatScreen(
-        ScriptedChatModel(replies=[reply]),
-        spend=spend,
-        model_name="gemini-3.5-flash-lite",
+        MeteredModel(ScriptedChatModel(replies=[reply]), priced.settings, spend)
     )
     assert await screen.probability("page text") == 0.1
     assert store.totals[DAY_KEY] == 3500  # + 400 x $2.50 per million

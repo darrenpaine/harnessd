@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
@@ -15,13 +16,14 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agent.graph import build_graph
+from agent.metered import MeteredModel
 from agent.persistence import ThreadBusyError, ThreadGuard
 from agent.runner import AgentRunner
 from agent.screen import Screen
 from agent.spend import DailySpend
 from fakes import ScriptedChatModel
 from schemas import AgentRequest, AgentResponse
-from settings import LogLevel
+from settings import LogLevel, Settings
 from tools import TOOLS
 from tools.base import ToolContext
 from tracing import Tracing
@@ -67,6 +69,25 @@ class LocalThreadGuard:
         return None
 
 
+class MemorySpendStore:
+    """A `SpendStore` in memory: micro-dollars per day key."""
+
+    def __init__(self, totals: dict[str, int] | None = None) -> None:
+        self.totals = totals or {}
+
+    async def total(self, key: str) -> int:
+        return self.totals.get(key, 0)
+
+    async def add(self, key: str, micro_usd: int) -> int:
+        self.totals[key] = self.totals.get(key, 0) + micro_usd
+        return self.totals[key]
+
+
+def metered(model: BaseChatModel) -> MeteredModel:
+    """`model` as a metered model on default settings: free, with no daily limit."""
+    return MeteredModel(model, Settings(_env_file=None))  # type: ignore[call-arg]
+
+
 def tool_turn(*calls: tuple[str, dict[str, Any]], text: str = "") -> AIMessage:
     """A model reply requesting `calls`, given as (tool name, args) pairs."""
     return AIMessage(
@@ -106,17 +127,16 @@ class Agent:
         self._custom = serve
         self.model = ScriptedChatModel(replies=replies, delay=delay)
         self.ctx = dataclasses.replace(ctx, transport=httpx.MockTransport(self._serve))
+        self.metered = MeteredModel(self.model, ctx.settings, spend)
         self.graph = build_graph(
-            self.model,
+            self.metered,
             self.ctx,
             TOOLS,
             checkpointer or InMemorySaver(),
             screen=screen,
-            spend=spend,
         )
-        self.spend = spend
         self.guard = guard or LocalThreadGuard()
-        self.runner = AgentRunner(self.graph, ctx.settings, self.guard, spend)
+        self.runner = AgentRunner(self.graph, ctx.settings, self.guard, self.metered)
 
     def _serve(self, request: httpx.Request) -> httpx.Response:
         self.fetched.append(str(request.url))

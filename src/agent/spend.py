@@ -1,6 +1,7 @@
 """The daily cost limit (SPEC-0012 B-0010).
 
-`DailySpend` prices each model call and adds it to a counter for the UTC day.
+`DailySpend` adds each model call's cost to a counter for the UTC day; the
+metered model prices the call (`agent.metered`).
 The counter lives in a `SpendStore`: Redis in the app, so every instance shares
 it. The limit is checked before a call and spend added after it, so runs at the
 same time can each go over by up to one call.
@@ -12,8 +13,8 @@ from typing import Protocol
 
 from redis.asyncio import Redis
 
-from agent.budgets import BudgetStop, Tokens
-from agent.prices import MICRO_USD, cost_micro_usd, price_of
+from agent.budgets import BudgetStop
+from agent.prices import MICRO_USD
 from settings import Settings
 
 KEY_PREFIX = "harnessd:spend:"
@@ -68,7 +69,6 @@ class DailySpend:
         if settings.daily_cost_limit_usd is None:
             raise ValueError("DAILY_COST_LIMIT_USD is not set")
         self._store = store
-        self._provider = settings.llm_provider
         self._limit_usd = settings.daily_cost_limit_usd
         self._limit = round(settings.daily_cost_limit_usd * MICRO_USD)
         self._now = now
@@ -84,16 +84,13 @@ class DailySpend:
             stop.log()
             raise DailyLimitError(stop.message, self.retry_after())
 
-    async def add(self, model: str, tokens: Tokens) -> BudgetStop | None:
-        """Add one call's cost; the stop if the day is now at the limit.
-        Settings ensure every model in use has a price (B-0011)."""
-        price = price_of(self._provider, model)
-        if price is None:
-            raise ValueError(f"no price for {self._provider} {model}")
-        cost = cost_micro_usd(price, tokens.input, tokens.output)
+    async def add(self, micro_usd: int) -> BudgetStop | None:
+        """Add one call's cost; the stop if the day is now at the limit."""
         key = self._key()
         total = (
-            await self._store.add(key, cost) if cost else await self._store.total(key)
+            await self._store.add(key, micro_usd)
+            if micro_usd
+            else await self._store.total(key)
         )
         return self._stop(total)
 

@@ -1,48 +1,10 @@
-"""Token counts for the run and thread budgets (SPEC-0012 B-0008, B-0009, B-0014),
-and the budget stops they lead to (B-0013)."""
+"""The run and thread token budgets (SPEC-0012 B-0009, B-0014), a run's usage,
+and the budget stops (B-0013). Tokens are counted in `agent.metered`."""
 
-import json
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from langchain_core.messages import AIMessage, BaseMessage
-
 from logs import audit
-
-CHARS_PER_TOKEN = 4
-
-
-@dataclass(frozen=True)
-class Tokens:
-    """Tokens one model call used; `estimated` when the provider reported none."""
-
-    input: int
-    output: int
-    estimated: bool
-
-    @property
-    def count(self) -> int:
-        return self.input + self.output
-
-
-def call_tokens(prompt: Sequence[BaseMessage], reply: AIMessage) -> Tokens:
-    """Input and output tokens from the reply's usage metadata, or characters ÷ 4
-    of the prompt and of the reply when there is none (B-0008)."""
-    if (usage := reply.usage_metadata) is not None:
-        return Tokens(usage["input_tokens"], usage["output_tokens"], estimated=False)
-    return Tokens(
-        sum(_chars(message) for message in prompt) // CHARS_PER_TOKEN,
-        _chars(reply) // CHARS_PER_TOKEN,
-        estimated=True,
-    )
-
-
-def _chars(message: BaseMessage) -> int:
-    chars = len(str(message.text))
-    if isinstance(message, AIMessage):
-        chars += sum(len(json.dumps(call["args"])) for call in message.tool_calls)
-    return chars
 
 
 @dataclass(frozen=True)

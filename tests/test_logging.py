@@ -23,6 +23,7 @@ from agent_support import (
     Capture,
     LocalThreadGuard,
     fetch,
+    metered,
     note,
     tool_turn,
 )
@@ -210,7 +211,7 @@ async def api_client(
     clients: list[httpx.AsyncClient] = []
 
     def make(model: Any) -> httpx.AsyncClient:
-        graph = build_graph(model, tool_context, TOOLS, InMemorySaver())
+        graph = build_graph(metered(model), tool_context, TOOLS, InMemorySaver())
         guard = LocalThreadGuard()
         app.dependency_overrides[get_settings] = lambda: tool_context.settings
         app.dependency_overrides[get_graph] = lambda: graph

@@ -41,6 +41,7 @@ from agent_support import (
     StartTracing,
     fetch,
     finished_spans,
+    metered,
     note,
     tool_turn,
 )
@@ -193,7 +194,7 @@ def system_one(serve: Serve) -> SystemOneScreen:
 
 def chat(*replies: str) -> ChatScreen:
     scripted = [AIMessage(content=reply) for reply in replies]
-    return ChatScreen(ScriptedChatModel(replies=scripted))
+    return ChatScreen(metered(ScriptedChatModel(replies=scripted)))
 
 
 def screen_of(kind: str, score: float) -> Screen:
@@ -290,7 +291,7 @@ async def test_system_one_state_holds_page(tool_context: ToolContext) -> None:
 async def test_chat_screen_sends_page_as_data() -> None:
     model = ScriptedChatModel(replies=[AIMessage(content='{"probability": 0.25}')])
 
-    assert await ChatScreen(model).probability("the page") == 0.25
+    assert await ChatScreen(metered(model)).probability("the page") == 0.25
 
     [[system, human]] = model.calls
     assert isinstance(system, SystemMessage)
@@ -439,9 +440,15 @@ FAILING: dict[str, Callable[[], Screen]] = {
     "chat-extra-field": lambda: chat('{"probability": 0.1, "why": "fine"}'),
     "chat-out-of-range": lambda: chat('{"probability": 7}'),
     "chat-text-number": lambda: chat('{"probability": "0.1"}'),
-    "chat-raises": lambda: ChatScreen(RaisingChatModel(error=ValueError("down"))),
+    "chat-raises": lambda: ChatScreen(
+        metered(RaisingChatModel(error=ValueError("down")))
+    ),
     "chat-timeout": lambda: ChatScreen(
-        ScriptedChatModel(replies=[AIMessage(content='{"probability": 0.1}')], delay=1),
+        metered(
+            ScriptedChatModel(
+                replies=[AIMessage(content='{"probability": 0.1}')], delay=1
+            )
+        ),
         timeout_seconds=0.01,
     ),
 }
@@ -602,7 +609,7 @@ async def test_screen_preload(
     # Nothing to load for the other kinds; a scripted chat model with no replies
     # would fail if it were asked anything.
     await preload(None)
-    await preload(ChatScreen(ScriptedChatModel(replies=[])))
+    await preload(ChatScreen(metered(ScriptedChatModel(replies=[]))))
 
 
 TAVILY_KEY = "tvly-test-0123456789"
