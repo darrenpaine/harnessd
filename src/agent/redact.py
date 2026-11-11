@@ -55,6 +55,15 @@ class Redactor:
         _log(count)
         return response.model_copy(update={"answer": answer})
 
+    def summary(self, summary: str | None) -> str | None:
+        """A compaction's summary, redacted (B-0003)."""
+        if summary is None:
+            return None
+        text, count = self.redact(summary)
+        if count:
+            _log(count)
+        return text
+
     def thread(self, state: ThreadState) -> ThreadState:
         """The thread view with its message text and summary redacted (B-0003)."""
         count = 0

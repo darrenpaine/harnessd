@@ -140,7 +140,7 @@ class ThreadService:
                 thread_id=thread_id,
                 compacted=bool(removed),
                 messages_removed=len(removed),
-                summary=summary,
+                summary=self.redactor.summary(summary),  # SPEC-0012 B-0003
             )
 
     async def _state(self, thread_id: UUID) -> AgentThreadState:
