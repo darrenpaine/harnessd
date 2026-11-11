@@ -62,7 +62,7 @@ Status values:
 
 | Id | STRIDE | Threat | Mitigation | Status |
 |----|--------|--------|------------|--------|
-| T-01 | Spoofing | Any caller can use the API as if they were the operator. | None locally. SPEC-0013 B-0001 adds an `X-API-Key` check. | planned; accepted locally (non-goal) |
+| T-01 | Spoofing | Any caller can use the API as if they were the operator. | No authentication (a non-goal). Compose publishes the API on 127.0.0.1 only, so callers must be on the same machine. SPEC-0013 B-0001 adds an `X-API-Key` check. | planned; accepted locally (non-goal) |
 | T-02 | Info disclosure, Tampering | A caller who knows a thread id can read, continue, compact or delete that thread. Ids are UUIDs, but a client may choose its own, and they appear in logs and traces. | Server-made ids are uuid4. No per-thread owner. | accepted (single operator); revisit with auth |
 | T-03 | Elevation | A caller approves a pending action they did not request, by sending `confirm` for someone else's thread. | Same as T-02: confirmation proves a request, not who sent it. | accepted (single operator); revisit with auth |
 | T-04 | Tampering | Malformed or oversized input reaches the model or a tool. | Pydantic validation at the boundary; message ≤ 4000 chars, `max_tool_calls` 1..20 (SPEC-0002 B-0001, SPEC-0012 B-0001). | mitigated |
@@ -118,7 +118,7 @@ Covered under LLM01 below; it is the main threat to this service.
 | Id | STRIDE | Threat | Mitigation | Status |
 |----|--------|--------|------------|--------|
 | T-27 | Info disclosure | Logs hold message text, answers, tool outputs or keys. | No level logs them; tool inputs only at `debug`, cut to 200 chars (SPEC-0008 B-0004). Audit events are content-free (SPEC-0012 B-0013). | mitigated |
-| T-28 | Info disclosure | Traces hold full prompts, replies and tool I/O, sent to whatever OTLP endpoint is configured. `TRACE_CONTENT` defaults to true. | `TRACE_CONTENT=false` removes content from spans; keys never appear (SPEC-0010 B-0004). | partly: content is on by default, and secrets inside message text are not redacted in spans; [#68](https://github.com/darrenpaine/harnessd/issues/68) |
+| T-28 | Info disclosure | Traces hold full prompts, replies and tool I/O, sent to whatever OTLP endpoint is configured. `TRACE_CONTENT` defaults to true. | `TRACE_CONTENT=false` removes content from spans; keys never appear (SPEC-0010 B-0004). The local Langfuse from compose is published on 127.0.0.1 only. | partly: content is on by default, and secrets inside message text are not redacted in spans; [#68](https://github.com/darrenpaine/harnessd/issues/68) |
 | T-29 | Tampering (log injection) | A client-supplied `X-Request-ID` forges log lines. | Ids that break the format are replaced (SPEC-0010 B-0007). | mitigated |
 | T-30 | Repudiation | Audit lines are lost or altered. | They go to stdout with the other logs; there is no separate, tamper-evident store. | accepted |
 

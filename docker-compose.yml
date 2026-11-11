@@ -18,7 +18,8 @@ services:
   harnessd:
     build: .
     ports:
-      - "5999:5999"
+      # Only this machine: the API has no authentication (threat model T-01).
+      - "127.0.0.1:5999:5999"
     env_file:
       - path: .env
         required: false
@@ -59,7 +60,9 @@ services:
       langfuse-redis:
         condition: service_healthy
     ports:
-      - "5998:3000"  # host port 5998: 3000 is often taken
+      # Only this machine: Langfuse uses its local default passwords, and takes
+      # traces with message text. Host port 5998, as 3000 is often taken.
+      - "127.0.0.1:5998:3000"
     environment:
       <<: &langfuse-env
         NEXTAUTH_URL: http://localhost:5998
