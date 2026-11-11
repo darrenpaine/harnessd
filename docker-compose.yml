@@ -16,7 +16,12 @@ services:
       - ${REDIS_DATA_DIR:-./data/redis}:/data
 
   harnessd:
-    build: .
+    build:
+      context: .
+      args:
+        # The app runs as this user; it must be able to write NOTES_DIR.
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     ports:
       # Only this machine: the API has no authentication (threat model T-01).
       - "127.0.0.1:5999:5999"
