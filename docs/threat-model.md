@@ -127,7 +127,7 @@ Covered under LLM01 below; it is the main threat to this service.
 | Id | STRIDE | Threat | Mitigation | Status |
 |----|--------|--------|------------|--------|
 | T-31 | Tampering | A compromised or vulnerable dependency. | Versions pinned in `uv.lock`; new dependencies need approval (CLAUDE.md). No vulnerability scan in CI. | partly: [#70](https://github.com/darrenpaine/harnessd/issues/70) |
-| T-32 | Elevation | The container runs as root, so a code-execution bug has the whole container and its volumes. | None: the Dockerfile sets no `USER`. | open: [#67](https://github.com/darrenpaine/harnessd/issues/67) |
+| T-32 | Elevation | The container runs as root, so a code-execution bug has the whole container and its volumes. | The app runs as the unprivileged user `app` ([#67](https://github.com/darrenpaine/harnessd/issues/67)); it cannot change the app's code or installed packages, which root owns. | mitigated |
 | T-33 | Info disclosure | A secret is committed. | `.env` is gitignored; tests clear secret environment variables. No secret scanner in pre-commit or CI. | partly: [#70](https://github.com/darrenpaine/harnessd/issues/70) |
 | T-34 | Tampering | `ShallowRedisSaver` overrides a private method of `langgraph-checkpoint-redis`; an upgrade can change behavior silently. | Import fails if the method goes; SPEC-0004 AT-0006 fails if it stops applying. | mitigated |
 
@@ -156,7 +156,6 @@ reason.
 |--------|-----------------|-------|
 | T-20 | DNS rebinding in fetch_site. | [#71](https://github.com/darrenpaine/harnessd/issues/71) |
 | T-06 | `pending_action.input` and tool call records are returned unredacted. | [#69](https://github.com/darrenpaine/harnessd/issues/69) |
-| T-32 | The container runs as root. | [#67](https://github.com/darrenpaine/harnessd/issues/67) |
 | T-31, T-33 | No dependency or secret scanning in CI. | [#70](https://github.com/darrenpaine/harnessd/issues/70) |
 | T-28 | Trace content is on by default. | [#68](https://github.com/darrenpaine/harnessd/issues/68) |
 
