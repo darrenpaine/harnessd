@@ -2,14 +2,5 @@
 # fail on. One id per line, then a comment: package, locked version, fixed version
 # and why it is here. Remove a line once uv.lock has the fix.
 #
-# Present when the audit was added (#70). Each has a fixed release; the lock
-# update is left to its own pull request.
-#
-# virtualenv: dev only, through pre-commit.
-CVE-2026-113714  # virtualenv 21.14.7, fixed in 21.14.9
-CVE-2026-113715  # virtualenv 21.14.7, fixed in 21.14.9
-CVE-2026-113717  # virtualenv 21.14.7, fixed in 21.14.9
-CVE-2026-113718  # virtualenv 21.14.7, fixed in 21.14.9
-CVE-2026-113720  # virtualenv 21.14.7, fixed in 21.14.9
-CVE-2026-113722  # virtualenv 21.14.7, fixed in 21.14.9
-CVE-2026-113723  # virtualenv 21.14.7, fixed in 21.14.9
+# Example:
+# CVE-0000-00000  # somepackage 1.2.3, fixed in 1.2.4; waiting for <reason>
