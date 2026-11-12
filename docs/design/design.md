@@ -77,7 +77,7 @@ yet written.
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState, AgentThreadState (a thread's status, pending action, messages and summary as `AgentThreads` reports it) and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key, if the injection screen is on with no `INJECTION_SCREEN_MODEL`, or if `MAX_TOKENS_PER_RUN` is larger than `MAX_TOKENS_PER_THREAD`. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004, SPEC-0012 B-0005, B-0006, B-0009, B-0014 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic, ChatGoogleGenerativeAI or ChatOpenAI from settings, no network calls. ChatOpenAI's base URL is pinned to OpenAI's API, so environment variables can't redirect it. With `LLM_REQUESTS_PER_MINUTE` set, each model gets its own `InMemoryRateLimiter` (evenly spaced calls, no burst), so calls wait instead of hitting a provider quota. | SPEC-0001 B-0001, B-0008 | built |
-| `src/agent/persistence.py` | `open_checkpointer()` (shallow Redis checkpointer with TTL; `ShallowRedisSaver` loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
+| `src/agent/persistence.py` | `open_checkpointer()` (the library's shallow Redis checkpointer with TTL, which loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
 | `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver, and the network backend that opens fetch_site's connections when no transport is given), `ToolFailure`, `call_tool()`. `resolve_host` keeps the system's address order, so the first address is the one to connect to. | SPEC-0003 B-0001..B-0003, B-0006 | built |
 | `src/tools/pinned.py` | `PinnedTransport`: an httpx transport of our own around an `httpcore` connection pool, whose network backend connects to the address pinned for each host name and never resolves a name. The URL keeps the host name, so the `Host` header, TLS server name and certificate check are unchanged. httpx's own transport takes no network backend, and this avoids replacing a private attribute of it; `httpcore` is a direct dependency for that reason. With an explicit transport, httpx no longer uses proxy environment variables for fetch_site. | SPEC-0003 B-0006 | built |
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. web_search cuts snippets to 500 chars; fetch_site's text leaves out comments, scripts and styles, and elements hidden by the `hidden` attribute, `aria-hidden` or an inline `display:none` / `visibility:hidden`. fetch_site resolves each hop's host once, requires every address to be global, and connects to the first one only (no fallback to the others) through `PinnedTransport`, so a DNS answer that changes after the check is never used. | SPEC-0003 B-0005..B-0007, SPEC-0012 B-0001, B-0016 | built |
@@ -222,7 +222,7 @@ runner see a thread only through its interface.
 
 | Key | Written by | Expiry |
 |-----|-----------|--------|
-| `checkpoint:<thread>:…`, `checkpoint_write:<thread>:…` and related | `ShallowRedisSaver`, our subclass of `AsyncShallowRedisSaver` (latest state per thread only) | `CHECKPOINT_TTL_HOURS` (24 h), reset on every key after each run |
+| `checkpoint:<thread>:…`, `checkpoint_write:<thread>:…` and related | `AsyncShallowRedisSaver` from `langgraph-checkpoint-redis` (latest state per thread only) | `CHECKPOINT_TTL_HOURS` (24 h), reset on every key after each run |
 | `harnessd:lock:thread:<thread>` | `thread_lock()` | `RUN_TIMEOUT_SECONDS` + 30 s |
 
 The checkpointer sets a TTL only on keys it writes in the current run, so keys from
@@ -318,16 +318,13 @@ to every key containing the thread id (a UUID) after each run, except the lock k
   attach them to `agent.run` instead; `test_run_span_tree` would catch it.
 - **Langfuse stack** needs several GB of RAM (Postgres, ClickHouse, Redis, MinIO),
   so it runs only under the `observability` profile, never in CI.
-- **langgraph-checkpoint-redis private API**: version 0.5.2 loads every pending
+- **langgraph-checkpoint-redis pending writes**: version 0.5.2 loaded every pending
   write a thread ever made, not just the latest checkpoint's, so a second
-  confirmation on a thread failed with `InvalidUpdateError`. `ShallowRedisSaver`
-  overrides the private `_aload_pending_writes` and relies on the library's key
-  layout and write documents, so an upgrade can break it silently. Import fails
-  if the method disappears, and SPEC-0004 AT-0006
-  (`test_repeated_confirmations`) fails if it stops applying; re-check the class on
-  every upgrade, and drop it once the library is fixed
-  ([langgraph-redis#215](https://github.com/redis-developer/langgraph-redis/issues/215)). The old writes still stay
-  in Redis until the thread expires.
+  confirmation on a thread failed with `InvalidUpdateError`
+  ([langgraph-redis#215](https://github.com/redis-developer/langgraph-redis/issues/215)).
+  Version 0.6.0 fixed it, and our override of a private method went with the
+  upgrade. SPEC-0004 AT-0006 (`test_repeated_confirmations`) is the regression
+  test. The old writes still stay in Redis until the thread expires.
 - **langgraph-checkpoint-redis** emits a deprecation warning about
   `get_async_redis_connection`; watch for a breaking release.
 - **Traceability script** (SPEC-0006) isn't built yet, so gaps are checked by hand.
