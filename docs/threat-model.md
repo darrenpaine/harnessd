@@ -118,7 +118,7 @@ Covered under LLM01 below; it is the main threat to this service.
 | Id | STRIDE | Threat | Mitigation | Status |
 |----|--------|--------|------------|--------|
 | T-27 | Info disclosure | Logs hold message text, answers, tool outputs or keys. | No level logs them; tool inputs only at `debug`, cut to 200 chars (SPEC-0008 B-0004). Audit events are content-free (SPEC-0012 B-0013). | mitigated |
-| T-28 | Info disclosure | Traces hold full prompts, replies and tool I/O, sent to whatever OTLP endpoint is configured. `TRACE_CONTENT` defaults to true. | `TRACE_CONTENT=false` removes content from spans; keys never appear (SPEC-0010 B-0004). The local Langfuse from compose is published on 127.0.0.1 only. | partly: content is on by default, and secrets inside message text are not redacted in spans; [#68](https://github.com/darrenpaine/harnessd/issues/68) |
+| T-28 | Info disclosure | Traces hold full prompts, replies and tool I/O, sent to whatever OTLP endpoint is configured. `TRACE_CONTENT` defaults to true. | `TRACE_CONTENT=false` removes content from spans; keys never appear (SPEC-0010 B-0004). The local Langfuse from compose is published on 127.0.0.1 only. | accepted while the service is under development and testing: content stays on by default because the traces are used to debug runs, and secrets inside message text are not redacted in spans ([#68](https://github.com/darrenpaine/harnessd/issues/68)) |
 | T-29 | Tampering (log injection) | A client-supplied `X-Request-ID` forges log lines. | Ids that break the format are replaced (SPEC-0010 B-0007). | mitigated |
 | T-30 | Repudiation | Audit lines are lost or altered. | They go to stdout with the other logs; there is no separate, tamper-evident store. | accepted |
 
@@ -157,7 +157,6 @@ reason.
 | T-20 | DNS rebinding in fetch_site. | [#71](https://github.com/darrenpaine/harnessd/issues/71) |
 | T-06 | `pending_action.input` and tool call records are returned unredacted. | [#69](https://github.com/darrenpaine/harnessd/issues/69) |
 | T-31, T-33 | No dependency or secret scanning in CI. | [#70](https://github.com/darrenpaine/harnessd/issues/70) |
-| T-28 | Trace content is on by default. | [#68](https://github.com/darrenpaine/harnessd/issues/68) |
 
 ## Revisit when
 
@@ -165,6 +164,8 @@ reason.
   to needing per-caller thread ownership.
 - A tool is added: add its boundary, and check LLM02 and LLM06 for it. A second
   side-effecting tool, or one that takes longer than the run timeout, reopens T-25.
+- Development and testing end, or traces go to a backend the operator does not
+  run: T-28 (set `TRACE_CONTENT=false` by default, or redact span content).
 - The service is exposed beyond its operator: every "accepted (single operator)"
   row is reopened, and so are T-22 and LLM02 (b).
 - A retrieval store or memory across threads is added: LLM04 and LLM08.
