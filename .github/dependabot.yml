@@ -25,6 +25,13 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # The project targets one Python version (pyproject.toml, .python-version
+      # and CI), so the image moves to a new one by hand, with them.
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   - package-ecosystem: pre-commit  # hook revisions, such as gitleaks
     directory: /
