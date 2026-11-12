@@ -1,6 +1,6 @@
 # SPEC-0003: Tool contract
 
-Status: draft
+Status: reviewed
 Requirements: R-0007
 Design: [design.md](../design/design.md)
 

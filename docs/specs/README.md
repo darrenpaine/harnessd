@@ -7,7 +7,7 @@ SPEC-0006.
 |----|-------|--------|------|
 | SPEC-0001 | Agent core | reviewed | [0001-agent-core.md](0001-agent-core.md) |
 | SPEC-0002 | API service | implemented | [0002-api-service.md](0002-api-service.md) |
-| SPEC-0003 | Tool contract | draft | [0003-tool-contract.md](0003-tool-contract.md) |
+| SPEC-0003 | Tool contract | reviewed | [0003-tool-contract.md](0003-tool-contract.md) |
 | SPEC-0004 | State and persistence | implemented | [0004-state-persistence.md](0004-state-persistence.md) |
 | SPEC-0005 | Test strategy | implemented | [0005-test-strategy.md](0005-test-strategy.md) |
 | SPEC-0006 | Traceability | implemented | [0006-traceability.md](0006-traceability.md) |
