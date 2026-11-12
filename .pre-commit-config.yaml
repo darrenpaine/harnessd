@@ -19,3 +19,9 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+  # Secrets in staged changes (threat model T-33). Findings that are not secrets
+  # go in .gitleaksignore, or mark the line with `gitleaks:allow`.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
