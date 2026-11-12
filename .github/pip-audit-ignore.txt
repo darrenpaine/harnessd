@@ -3,31 +3,8 @@
 # and why it is here. Remove a line once uv.lock has the fix.
 #
 # Present when the audit was added (#70). Each has a fixed release; the lock
-# update is left to its own pull request (Dependabot's first uv update).
+# update is left to its own pull request.
 #
-# pyasn1: runtime, through langchain-google-genai -> google-auth.
-CVE-2026-119194  # pyasn1 0.6.4, fixed in 0.6.5
-CVE-2026-119195  # pyasn1 0.6.4, fixed in 0.6.5
-CVE-2026-119196  # pyasn1 0.6.4, fixed in 0.6.5
-CVE-2026-119197  # pyasn1 0.6.4, fixed in 0.6.5
-# filelock: dev only, through pre-commit -> virtualenv.
-CVE-2026-112906  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112907  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112908  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112909  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112910  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112911  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112912  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112913  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112914  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112915  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112934  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112935  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112937  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112938  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112939  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112940  # filelock 4.1.1, fixed in 4.2.1
-CVE-2026-112941  # filelock 4.1.1, fixed in 4.2.1
 # virtualenv: dev only, through pre-commit.
 CVE-2026-113714  # virtualenv 21.14.7, fixed in 21.14.9
 CVE-2026-113715  # virtualenv 21.14.7, fixed in 21.14.9
