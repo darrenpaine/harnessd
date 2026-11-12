@@ -662,7 +662,7 @@ async def test_screen_preload(
     await preload(ChatScreen(metered(ScriptedChatModel(replies=[]))))
 
 
-TAVILY_KEY = "tvly-test-0123456789"
+TAVILY_KEY = "tvly-test-0123456789"  # gitleaks:allow (made-up key)
 SHORT_KEY = "k-1234"  # under 8 characters: never redacted
 
 

@@ -1,0 +1,5 @@
+# Findings gitleaks reports in past commits that are not secrets (threat model
+# T-33). Both are made-up keys in redaction tests; the lines now carry
+# `gitleaks:allow`. One fingerprint per line: commit:file:rule:line.
+ffff808e38eb4c3ad8b8cf5a1e456c940ca73965:tests/test_redaction_sweep.py:generic-api-key:23
+7d4f2e8dd32213358984297c74185758dfc76237:tests/test_guardrails.py:generic-api-key:608
