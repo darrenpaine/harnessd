@@ -99,7 +99,8 @@ yet written.
 | `tests/fakes.py` | `ScriptedChatModel`: replays scripted replies, records inputs. | SPEC-0005 B-0002 | built |
 | `tests/conftest.py`, `tests/redis_support.py` | Clears API keys for every test; `redis_url` fixture (skip locally, fail in CI); `tool_context` fixture. | SPEC-0005 | built |
 | `Dockerfile`, `docker-compose.yml` | App image, run as the unprivileged user `app` (`APP_UID` / `APP_GID`, default 1000); Redis 8.2 with data in a host folder (`REDIS_DATA_DIR`), published on 127.0.0.1 only, like the app and Langfuse; Langfuse and its stores under the `observability` profile (`make langfuse`). | SPEC-0010 | built |
-| `.github/workflows/ci.yaml` | Lint, format check, mypy; pytest with a Redis 8.2 service container. | SPEC-0005 | built |
+| `.github/workflows/ci.yaml` | Lint, format check, mypy; pytest with a Redis 8.2 service container; pip-audit of the packages in `uv.lock` (ignores in `.github/pip-audit-ignore.txt`); gitleaks on the pushed commits (ignores in `.gitleaksignore`). | SPEC-0005; threat model T-31, T-33 | built |
+| `.github/dependabot.yml` | Weekly version updates for uv, GitHub Actions, the Dockerfile and pre-commit hooks; minor and patch grouped. | threat model T-31 | built |
 
 ### Data flow
 A new message, then a confirmation of a side-effecting tool:
