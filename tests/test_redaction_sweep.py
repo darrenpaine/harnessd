@@ -20,7 +20,7 @@ from agent_support import MakeClient, fetch, tool_turn
 from app import app
 from tools.base import ToolContext
 
-SECRET = "tvly-test-0123456789"
+SECRET = "tvly-test-0123456789"  # gitleaks:allow (made-up key)
 RUN = "/v1/agent/run"
 THREAD = "/v1/threads/{thread_id}"
 COMPACT = "/v1/threads/{thread_id}/compact"

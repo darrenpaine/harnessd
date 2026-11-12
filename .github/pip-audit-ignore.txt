@@ -1,0 +1,6 @@
+# Known vulnerabilities that the CI dependency audit (threat model T-31) does not
+# fail on. One id per line, then a comment: package, locked version, fixed version
+# and why it is here. Remove a line once uv.lock has the fix.
+#
+# Example:
+# CVE-0000-00000  # somepackage 1.2.3, fixed in 1.2.4; waiting for <reason>

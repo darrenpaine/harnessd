@@ -19,6 +19,38 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy .
 
+  # Known vulnerabilities in the locked dependencies (threat model T-31). Ids in
+  # .github/pip-audit-ignore.txt are reported but do not fail the job.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@main
+        with:
+          python-version: "3.14"
+      - run: uv export --locked --all-groups --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.txt"
+      - run: |
+          ignores=$(grep -oE '^[A-Za-z0-9-]+' .github/pip-audit-ignore.txt | sed 's/^/--ignore-vuln /')
+          uvx pip-audit@2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" \
+            --require-hashes --disable-pip --strict $ignores
+
+  # Secrets in the commits being pushed (threat model T-33). Findings that are not
+  # secrets go in .gitleaksignore.
+  secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_ENABLE_COMMENTS: false
+
   pytest:
     runs-on: ubuntu-latest
     services:
