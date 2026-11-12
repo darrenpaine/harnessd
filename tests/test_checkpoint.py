@@ -35,11 +35,10 @@ from tools.base import ToolContext
 pytestmark = pytest.mark.redis
 
 # Shown when AT-0006 fails: the likely cause is a library upgrade.
-PRIVATE_API_HINT = (
-    "repeated confirmations broke: agent.persistence.ShallowRedisSaver overrides "
-    "the private AsyncShallowRedisSaver._aload_pending_writes of "
-    "langgraph-checkpoint-redis; if the package was upgraded, check that the "
-    "override still applies (SPEC-0004 B-0006)"
+LIBRARY_HINT = (
+    "repeated confirmations broke: langgraph-checkpoint-redis must load only the "
+    "pending writes of a thread's latest checkpoint, as it does from 0.6.0 "
+    "(SPEC-0004 B-0006); check what an upgrade changed"
 )
 
 
@@ -206,8 +205,8 @@ async def test_repeated_confirmations(
             "/v1/agent/run", json={"thread_id": thread_id, **body}
         )
         state = await client.get(f"/v1/threads/{thread_id}")
-        assert response.status_code == 200, f"{PRIVATE_API_HINT}\n{response.text}"
-        assert state.status_code == 200, f"{PRIVATE_API_HINT}\n{state.text}"
+        assert response.status_code == 200, f"{LIBRARY_HINT}\n{response.text}"
+        assert state.status_code == 200, f"{LIBRARY_HINT}\n{state.text}"
         return response.json()
 
     async with open_checkpointer(agent_settings) as saver:
@@ -219,9 +218,9 @@ async def test_repeated_confirmations(
             results.append((paused["status"], done["status"]))
 
     expected = [("awaiting_confirmation", "ok")] * 3
-    assert results == expected, PRIVATE_API_HINT
+    assert results == expected, LIBRARY_HINT
     [rejected] = done["tool_calls"]
-    assert rejected["error"]["code"] == "rejected", PRIVATE_API_HINT
+    assert rejected["error"]["code"] == "rejected", LIBRARY_HINT
     lines = agent_settings.notes_path.read_text().splitlines()
     assert [line.split("\t")[-1] for line in lines] == ["one", "two"]
 
