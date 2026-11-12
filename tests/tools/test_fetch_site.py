@@ -2,8 +2,10 @@
 
 import dataclasses
 import ipaddress
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 
+import httpcore
 import httpx
 import pytest
 
@@ -244,3 +246,69 @@ async def test_reads_at_most_1mb(tool_context: ToolContext) -> None:
     )
     assert isinstance(result, FetchSiteOutput)
     assert result.truncated and len(result.text) == 1000
+
+
+class RecordingNetwork(httpcore.AsyncNetworkBackend):
+    """A fake network: records the address of each connection and answers it
+    with the next canned HTTP response."""
+
+    def __init__(self, responses: list[bytes]) -> None:
+        self.responses = responses
+        self.connected: list[str] = []
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        self.connected.append(host)
+        return httpcore.AsyncMockStream([self.responses.pop(0)])
+
+
+@pytest.mark.spec("SPEC-0003", "B-0006", "AT-0008")
+async def test_connects_to_checked_address(tool_context: ToolContext) -> None:
+    """DNS rebinding: each host answers with a public address on its first
+    lookup and loopback on any later one."""
+    public = {"example.com": "93.184.215.14", "next.example.com": "93.184.215.15"}
+    lookups: list[str] = []
+
+    async def rebinding(host: str) -> list[str]:
+        lookups.append(host)
+        return [public[host]] if lookups.count(host) == 1 else ["127.0.0.1"]
+
+    network = RecordingNetwork(
+        [
+            b"HTTP/1.1 302 Found\r\nLocation: http://next.example.com/page\r\n"
+            b"Content-Length: 0\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+            b"Content-Length: 5\r\n\r\nhello",
+        ]
+    )
+    ctx = dataclasses.replace(tool_context, resolve=rebinding, network=network)
+
+    result = await _fetch(ctx, "http://example.com/")
+
+    assert isinstance(result, FetchSiteOutput)
+    assert result.text == "hello"
+    # Each connection went to the address that was checked, and no host name
+    # was looked up a second time.
+    assert network.connected == ["93.184.215.14", "93.184.215.15"]
+    assert lookups == ["example.com", "next.example.com"]
+
+
+@pytest.mark.spec("SPEC-0003", "B-0006")
+async def test_checks_every_resolved_address(tool_context: ToolContext) -> None:
+    async def mixed(host: str) -> list[str]:
+        return ["93.184.215.14", "10.1.2.3"]
+
+    network = RecordingNetwork([])
+    ctx = dataclasses.replace(tool_context, resolve=mixed, network=network)
+
+    result = await _fetch(ctx, "http://example.com/")
+
+    assert isinstance(result, ToolError)
+    assert result.code == "invalid_input"
+    assert network.connected == []

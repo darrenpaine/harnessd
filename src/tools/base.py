@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import httpcore
 import httpx
 from pydantic import BaseModel, ValidationError
 
@@ -27,20 +28,23 @@ class ToolFailure(Exception):
 
 
 async def resolve_host(host: str) -> list[str]:
-    """IP addresses a host name resolves to."""
+    """IP addresses a host name resolves to, in the system's order of
+    preference, so the first is the one to connect to."""
     infos = await asyncio.get_running_loop().getaddrinfo(
         host, None, type=socket.SOCK_STREAM
     )
-    return sorted({str(info[4][0]) for info in infos})
+    return list(dict.fromkeys(str(info[4][0]) for info in infos))
 
 
 @dataclass(frozen=True)
 class ToolContext:
-    """What a tool may use. Tests replace the transport and resolver."""
+    """What a tool may use. Tests replace the transport and resolver, or the
+    `network` that opens fetch_site's connections when no transport is given."""
 
     settings: Settings
     transport: httpx.AsyncBaseTransport | None = None
     resolve: Resolver = resolve_host
+    network: httpcore.AsyncNetworkBackend | None = None
 
 
 @dataclass(frozen=True)
