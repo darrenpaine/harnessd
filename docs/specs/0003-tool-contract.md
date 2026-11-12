@@ -1,6 +1,6 @@
 # SPEC-0003: Tool contract
 
-Status: implemented
+Status: draft
 Requirements: R-0007
 Design: [design.md](../design/design.md)
 
@@ -60,6 +60,12 @@ error is set.
 - fetch_site: returns visible text extracted from HTML (or plain text), cut to 1000
   chars with `truncated` set. At most 3 redirects. Rejects non-text content and
   private, loopback and link-local addresses (including after redirects).
+  Every address the host name resolves to must pass this check, and the connection
+  is made to an address that passed it, for the first request and for each
+  redirect, without resolving the name again. The `Host` header, the TLS server
+  name and certificate checks still use the host name from the URL. So a host
+  whose DNS answer changes between the check and the connection cannot reach a
+  private, loopback or link-local address.
 - add_note: appends `<ISO-8601 UTC timestamp>\t<text>\n` to `NOTES_PATH` (default
   `data/notes.txt`), creating the file and folder if needed.
 
@@ -80,6 +86,11 @@ error is set.
   -> `tests/tools/test_fetch_site.py`
 - AT-0007 (B-0007): add_note writes one correctly formatted line to a temp NOTES_PATH.
   -> `tests/tools/test_add_note.py`
+- AT-0008 (B-0006): With a resolver that returns a public address on the first
+  lookup of a host and a loopback address on the second, fetch_site (network
+  mocked) connects only to the public address, for the first request and after a
+  redirect; no connection is made to the loopback address.
+  -> `tests/tools/test_fetch_site.py::test_connects_to_checked_address`
 
 ## Non-goals
 Dynamic tool loading, per-user tool permissions, tool retries inside the tool.
