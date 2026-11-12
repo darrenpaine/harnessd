@@ -95,8 +95,8 @@ Status values:
 
 | Id | STRIDE | Threat | Mitigation | Status |
 |----|--------|--------|------------|--------|
-| T-19 | Elevation (SSRF) | The model, steered by a user or a page, fetches an internal address: cloud metadata, Redis, Langfuse. | fetch_site rejects private, loopback and link-local addresses, also after each redirect; at most 3 redirects; http(s) only (SPEC-0003 B-0006). | partly: see T-20 |
-| T-20 | Elevation (SSRF) | DNS rebinding: the address is checked, then `httpx` resolves again on connect and may get an internal one. | None. Fix: connect to the checked IP. | open: [#71](https://github.com/darrenpaine/harnessd/issues/71) |
+| T-19 | Elevation (SSRF) | The model, steered by a user or a page, fetches an internal address: cloud metadata, Redis, Langfuse. | fetch_site rejects private, loopback and link-local addresses, also after each redirect; at most 3 redirects; http(s) only (SPEC-0003 B-0006). | mitigated |
+| T-20 | Elevation (SSRF) | DNS rebinding: the address is checked, then the HTTP client resolves the name again on connect and may get an internal one. | fetch_site connects to the address it checked, for the first request and each redirect, and never resolves the name again (SPEC-0003 B-0006; [#71](https://github.com/darrenpaine/harnessd/issues/71)). | mitigated |
 | T-21 | Denial of service | A huge or slow response ties up a run. | 10 s tool timeout, 1 MB body cap, text content only, 1000 chars returned (SPEC-0003 B-0002, B-0006). | mitigated |
 | T-22 | Info disclosure | The model puts thread contents or a secret into a URL or search query, sending it to an outside server. | See LLM02 (b). | accepted for now |
 
@@ -154,7 +154,6 @@ reason.
 
 | Threat | What is missing | Issue |
 |--------|-----------------|-------|
-| T-20 | DNS rebinding in fetch_site. | [#71](https://github.com/darrenpaine/harnessd/issues/71) |
 | T-06 | `pending_action.input` and tool call records are returned unredacted. | [#69](https://github.com/darrenpaine/harnessd/issues/69) |
 
 ## Revisit when

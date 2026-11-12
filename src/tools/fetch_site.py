@@ -7,6 +7,7 @@ import httpx
 
 from schemas import FetchSiteInput, FetchSiteOutput
 from tools.base import Tool, ToolContext, ToolFailure
+from tools.pinned import PinnedTransport
 
 MAX_TEXT_CHARS = 1000
 MAX_REDIRECTS = 3
@@ -72,8 +73,9 @@ def visible_text(html: str) -> str:
     return " ".join(" ".join(parser.parts).split())
 
 
-async def _require_public(url: httpx.URL, ctx: ToolContext) -> None:
-    """Refuse URLs whose host is not a public internet address."""
+async def _require_public(url: httpx.URL, ctx: ToolContext) -> str:
+    """Refuse URLs whose host is not a public internet address: every address
+    it resolves to must be one. Returns the first, the one to connect to."""
     if url.scheme not in ("http", "https"):
         raise ToolFailure("invalid_input", f"only http(s) URLs are allowed: {url}")
     host = url.host
@@ -88,6 +90,7 @@ async def _require_public(url: httpx.URL, ctx: ToolContext) -> None:
     for address in addresses:
         if not ipaddress.ip_address(address.split("%")[0]).is_global:
             raise ToolFailure("invalid_input", f"{host} is not a public address")
+    return addresses[0]
 
 
 async def _read_limited(response: httpx.Response) -> bytes:
@@ -101,9 +104,14 @@ async def _read_limited(response: httpx.Response) -> bytes:
 
 async def fetch_site(data: FetchSiteInput, ctx: ToolContext) -> FetchSiteOutput:
     url = httpx.URL(str(data.url))
-    async with httpx.AsyncClient(transport=ctx.transport) as client:
+    # Each hop connects to the address that was checked, never resolving the
+    # name again (B-0006). A transport given by a test makes no connection.
+    pinned = PinnedTransport(ctx.network) if ctx.transport is None else None
+    async with httpx.AsyncClient(transport=ctx.transport or pinned) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            await _require_public(url, ctx)
+            address = await _require_public(url, ctx)
+            if pinned is not None:
+                pinned.pin(url, address)
             async with client.stream("GET", url) as response:
                 if response.has_redirect_location:
                     url = url.join(response.headers["location"])
