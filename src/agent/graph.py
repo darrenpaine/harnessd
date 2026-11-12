@@ -203,18 +203,33 @@ class Stop:
 
 
 @dataclass(frozen=True)
+class OverBudget:
+    """The reply took a budget to its limit; its tool calls are not run."""
+
+    stop: BudgetStop
+
+
+@dataclass(frozen=True)
 class RunCalls:
     """Queue the turn's calls; `invalid` if any can't run."""
 
     invalid: bool
 
 
-Verdict = Answer | Stop | RunCalls
+Verdict = Answer | Stop | OverBudget | RunCalls
 
 
-def model_turn(reply: AIMessage, state: AgentState, calls: ToolCalls) -> Verdict:
-    """What a model turn leads to (SPEC-0001 B-0002, B-0004). The checks run
-    in this order: no calls, invalid calls twice in a row, over the cap."""
+def model_turn(
+    reply: AIMessage,
+    state: AgentState,
+    calls: ToolCalls,
+    crossed: BudgetStop | None = None,
+) -> Verdict:
+    """What a model turn leads to (SPEC-0001 B-0002, B-0004, SPEC-0012 B-0009,
+    B-0010, B-0014). `crossed` is the budget the reply took to its limit, if
+    any. The checks run in this order: no calls (an answer is returned even if
+    it crossed a budget), invalid calls twice in a row, over the cap, a budget
+    crossed."""
     requested = len(reply.tool_calls) + len(reply.invalid_tool_calls)
     if not requested:
         if str(reply.text).strip():
@@ -242,6 +257,9 @@ def model_turn(reply: AIMessage, state: AgentState, calls: ToolCalls) -> Verdict
     if state["calls_used"] + requested > state["max_tool_calls"]:
         answer = str(reply.text).strip() or None
         return Stop(Outcome(status="truncated", answer=answer))
+
+    if crossed is not None:
+        return OverBudget(crossed)
 
     return RunCalls(invalid=invalid)
 
@@ -304,42 +322,24 @@ def build_graph(
             estimated=tokens.estimated,
             ms=elapsed_ms(started),
         )
-        match model_turn(reply, state, calls):
+        crossed = over_budget(**counts, max_run=max_run, max_thread=max_thread)
+        update: dict[str, Any] = {"messages": [reply], **counts, **usage}
+        match model_turn(reply, state, calls, crossed or result.day_stop):
             case Answer():
-                return Command(
-                    update={"messages": [reply], **counts, **usage}, goto=END
-                )
+                pass
             case Stop(outcome):
-                return Command(
-                    update={
-                        "messages": [reply],
-                        "outcome": outcome,
-                        **counts,
-                        **usage,
-                    },
-                    goto=END,
-                )
+                update["outcome"] = outcome
+            case OverBudget(stop):
+                update["outcome"] = _budget_outcome(stop)
             case RunCalls(invalid):
-                stop = over_budget(**counts, max_run=max_run, max_thread=max_thread)
-                if stop := stop or result.day_stop:
-                    return Command(
-                        update={
-                            "messages": [reply],
-                            "outcome": _budget_outcome(stop),
-                            **counts,
-                            **usage,
-                        },
-                        goto=END,
-                    )
-                update: dict[str, Any] = {
-                    **counts,
-                    **usage,
+                update |= {
                     "messages": [reply, *calls.malformed(reply)],
                     "queue": reply.tool_calls,
                     "calls_used": state["calls_used"] + requested,
                     "invalid_turns": state["invalid_turns"] + 1 if invalid else 0,
                 }
                 return Command(update=update, goto="tools")
+        return Command(update=update, goto=END)
 
     async def run_tools(state: AgentState) -> Command[str]:
         """Run queued calls in order, stopping before a side effect (B-0005)."""
