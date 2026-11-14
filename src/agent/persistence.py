@@ -1,12 +1,16 @@
 """Redis checkpointing, checkpoint TTL and the per-thread run lock (SPEC-0004)."""
 
-from collections.abc import AsyncGenerator, AsyncIterator
+import re
+from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
 import redis.exceptions
 from langgraph.checkpoint.redis.ashallow import AsyncShallowRedisSaver
+from langgraph.checkpoint.redis.base import CHECKPOINT_PREFIX, CHECKPOINT_WRITE_PREFIX
+from langgraph.checkpoint.redis.util import to_storage_safe_id, to_storage_safe_str
 from redis.asyncio import Redis
+from redis.commands.search.query import Query
 from redis.exceptions import LockError
 
 from settings import Settings
@@ -60,15 +64,37 @@ async def open_checkpointer(
         yield saver
 
 
-async def checkpoint_keys(redis: Redis, thread_id: str) -> AsyncIterator[bytes]:
-    """Every checkpointer key of a thread; the thread's lock key is left out.
+# The checkpointer's search indexes, one per kind of key it writes.
+INDEXES = (CHECKPOINT_PREFIX, CHECKPOINT_WRITE_PREFIX)
+# As many keys as the library itself looks up per thread in adelete_thread.
+MAX_KEYS = 10000
 
-    Thread ids are UUIDs, so matching on the id cannot find another thread's keys.
-    """
-    lock = lock_key(thread_id).encode()
-    async for key in redis.scan_iter(match=f"*{thread_id}*", count=1000):
-        if key != lock:
-            yield key
+
+def _tag(value: str) -> str:
+    """`value` escaped for a search TAG query."""
+    return re.sub(r"(\W)", r"\\\1", value)
+
+
+async def checkpoint_keys(redis: Redis, thread_id: str) -> list[str]:
+    """Every checkpointer key of a thread, found through the checkpointer's own
+    search indexes, as its `adelete_thread` finds them, never by scanning the
+    keyspace (SPEC-0014 B-0004). The indexes hold the checkpoint and its writes;
+    the per-namespace set of write keys is not indexed, so it is named here."""
+    query = Query(f"@thread_id:{{{_tag(thread_id)}}}")
+    query = query.return_fields("checkpoint_ns").paging(0, MAX_KEYS)
+    keys: list[str] = []
+    namespaces: set[str] = set()
+    for index in INDEXES:
+        result = await redis.ft(index).search(query)
+        for doc in result.docs:
+            keys.append(doc.id)
+            namespaces.add(doc.checkpoint_ns)
+    safe_id = to_storage_safe_id(thread_id)
+    keys += [
+        f"write_keys_zset:{safe_id}:{to_storage_safe_str(ns)}:shallow"
+        for ns in sorted(namespaces)
+    ]
+    return keys
 
 
 async def refresh_thread_ttl(redis: Redis, thread_id: str, seconds: int) -> int:
@@ -77,15 +103,20 @@ async def refresh_thread_ttl(redis: Redis, thread_id: str, seconds: int) -> int:
     The checkpointer sets a TTL only on keys it writes in a run, so keys from
     earlier runs would expire first. Returns the number of keys updated.
     """
-    count = 0
-    async for key in checkpoint_keys(redis, thread_id):
-        count += int(await redis.expire(key, seconds))
-    return count
+    keys = await checkpoint_keys(redis, thread_id)
+    async with redis.pipeline(transaction=False) as pipe:
+        for key in keys:
+            pipe.expire(key, seconds)
+        return sum(int(done) for done in await pipe.execute())
 
 
 async def thread_expiry(redis: Redis, thread_id: str) -> int | None:
     """Seconds until the thread's first key expires; None if no key expires."""
-    ttls = [await redis.ttl(key) async for key in checkpoint_keys(redis, thread_id)]
+    keys = await checkpoint_keys(redis, thread_id)
+    async with redis.pipeline(transaction=False) as pipe:
+        for key in keys:
+            pipe.ttl(key)
+        ttls = await pipe.execute()
     expiring = [ttl for ttl in ttls if ttl >= 0]
     return min(expiring) if expiring else None
 
