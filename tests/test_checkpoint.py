@@ -24,6 +24,7 @@ from agent.persistence import (
     lock_key,
     open_checkpointer,
     refresh_thread_ttl,
+    thread_expiry,
     thread_lock,
     ttl_seconds,
 )
@@ -119,6 +120,53 @@ async def test_checkpoint_ttl_set(settings: Settings, redis: Redis) -> None:
     assert updated == len(second) > len(first)
     # Every key, including those from the first run, was reset by the second.
     assert min(second) > limit_ms - 1000
+
+
+async def scan_calls(redis: Redis) -> int:
+    stats = await redis.info("commandstats")
+    return int(stats.get("cmdstat_scan", {}).get("calls", 0))
+
+
+async def keys_of(redis: Redis, thread_id: str) -> list[bytes]:
+    lock = lock_key(thread_id).encode()
+    keys = [k async for k in redis.scan_iter(match=f"*{thread_id}*")]
+    return [k for k in keys if k != lock]
+
+
+@pytest.mark.spec("SPEC-0014", "B-0004", "AT-0003")
+async def test_ttl_refresh_without_scan(
+    settings: Settings, redis: Redis, tool_context: ToolContext
+) -> None:
+    """A refresh resets exactly the thread's keys, including a pending
+    confirmation's writes, and sends no SCAN; another thread is left alone."""
+    agent_settings = tool_context.settings.model_copy(
+        update={"redis_url": settings.redis_url}
+    )
+    ctx = dataclasses.replace(tool_context, settings=agent_settings)
+    seconds = ttl_seconds(settings)
+    async with open_checkpointer(ctx.settings) as saver:
+        paused = await Agent(ctx, [tool_turn(note("x"))], checkpointer=saver).run(
+            message="note: x"
+        )
+        done = await Agent(ctx, [AIMessage(content="hi")], checkpointer=saver).run(
+            message="hi"
+        )
+    assert paused.status == "awaiting_confirmation"
+    mine, other = str(paused.thread_id), str(done.thread_id)
+    for key in await keys_of(redis, mine) + await keys_of(redis, other):
+        await redis.expire(key, 60)
+
+    before = await scan_calls(redis)
+    updated = await refresh_thread_ttl(redis, mine, seconds)
+    expires = await thread_expiry(redis, mine)
+    after = await scan_calls(redis)
+
+    keys = await keys_of(redis, mine)
+    assert updated == len(keys) > 2
+    assert all([await redis.ttl(key) > seconds - 5 for key in keys])
+    assert expires is not None and expires > seconds - 5
+    assert all([0 < await redis.ttl(key) <= 60 for key in await keys_of(redis, other)])
+    assert after == before
 
 
 @pytest.mark.spec("SPEC-0004", "B-0004", "AT-0004")
