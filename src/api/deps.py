@@ -5,6 +5,7 @@ Tests replace `get_graph`, `get_guard` and `get_metered` through
 """
 
 import asyncio
+import time
 from contextlib import AsyncExitStack
 from typing import Annotated
 
@@ -19,6 +20,7 @@ from agent.persistence import (
     REDIS_ERRORS,
     RedisThreadGuard,
     ThreadGuard,
+    build_redis,
     open_checkpointer,
 )
 from agent.runner import AgentRunner
@@ -40,6 +42,11 @@ class Services:
 
     Created lazily so the app starts, and /health answers, while Redis is down;
     requests then get 503 until Redis is back (SPEC-0002 B-0005).
+
+    One Redis client serves the checkpointer, the thread lock and the day's
+    spend (SPEC-0014 B-0001). After a Redis failure the next request rebuilds
+    the checkpointer and graph, at most once per `REDIS_HEALTH_CHECK_SECONDS`
+    (SPEC-0014 B-0003).
     """
 
     def __init__(self) -> None:
@@ -51,10 +58,12 @@ class Services:
         self._graph: AgentGraph | None = None
         self._screen: Screen | None = None
         self._screen_built = False
+        self._failed = False
+        self._built_at = 0.0
 
     def redis(self, settings: Settings) -> Redis:
         if self._redis is None:
-            self._redis = Redis.from_url(settings.redis_url)
+            self._redis = build_redis(settings)
         return self._redis
 
     def model(self, settings: Settings) -> BaseChatModel:
@@ -82,20 +91,37 @@ class Services:
             self._screen_built = True
         return self._screen
 
+    def redis_failed(self) -> None:
+        """A request failed on Redis: rebuild the checkpointer next time."""
+        self._failed = True
+
     async def graph(self, settings: Settings) -> AgentGraph:
         async with self._lock:
-            if self._graph is None:
-                saver = await self._stack.enter_async_context(
-                    open_checkpointer(settings)
-                )
-                self._graph = build_graph(
-                    self.metered(settings),
-                    ToolContext(settings=settings),
-                    TOOLS,
-                    saver,
-                    screen=self.screen(settings),
-                )
+            if self._graph is None or self._rebuild_due(settings):
+                self._graph = await self._build_graph(settings)
             return self._graph
+
+    def _rebuild_due(self, settings: Settings) -> bool:
+        waited = time.monotonic() - self._built_at
+        return self._failed and waited >= settings.redis_health_check_seconds
+
+    async def _build_graph(self, settings: Settings) -> AgentGraph:
+        """A new checkpointer and graph. A failed build keeps the old graph,
+        and the next try waits a full interval."""
+        self._built_at = time.monotonic()
+        stack = AsyncExitStack()
+        saver = await stack.enter_async_context(
+            open_checkpointer(settings, self.redis(settings))
+        )
+        old, self._stack, self._failed = self._stack, stack, False
+        await old.aclose()
+        return build_graph(
+            self.metered(settings),
+            ToolContext(settings=settings),
+            TOOLS,
+            saver,
+            screen=self.screen(settings),
+        )
 
     async def aclose(self) -> None:
         """Close the checkpointer and the Redis client.

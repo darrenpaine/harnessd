@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     run_timeout_seconds: float = Field(default=60, gt=0)  # SPEC-0001 B-0006
     checkpoint_ttl_hours: float = Field(default=24, gt=0)  # SPEC-0004 B-0003
     log_level: LogLevel = "info"  # SPEC-0008 B-0001
+    # Redis connections (SPEC-0014)
+    redis_health_check_seconds: float = Field(default=30, gt=0)
+    redis_socket_timeout_seconds: float = Field(default=5, gt=0)
+    redis_retries: int = Field(default=3, ge=0)
+    redis_max_connections: int = Field(default=5, ge=1)
     log_format: LogFormat = "text"  # SPEC-0010 B-0008
 
     # Tracing (SPEC-0010)
