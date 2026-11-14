@@ -1,9 +1,12 @@
 # Threat model
 
 What could go wrong with harnessd from a security point of view, what stops it, and
-what is left open. It uses two passes: STRIDE over each trust boundary, then the
-OWASP Top 10 for LLM Applications (2025), which covers the agent-specific threats
-STRIDE has no natural place for.
+what is left open. It uses STRIDE over each trust boundary, then three OWASP
+lists for the threats STRIDE has no natural place for: the Top 10 for LLM
+Applications 2026, the Top 10 for Agentic Applications 2026 (the agent chooses
+its own tools), and selected GenAI Data Security 2026 risks. OWASP ids carry
+their edition (`LLM03:2026`), because the 2025 list numbered the same risks
+differently.
 
 This file links and does not restate: a mitigation lives in the spec named beside
 it, and the tests for that behavior are in [traceability.md](traceability.md).
@@ -18,6 +21,7 @@ Status values:
 | planned | A reviewed spec covers it, not built yet. |
 | accepted | Known and left as is, with the reason. |
 | open | No decision yet. |
+| n/a | Does not apply, with the reason. |
 
 ## Scope and assumptions
 
@@ -69,7 +73,7 @@ Status values:
 | T-05 | Info disclosure | Errors leak stack traces, exception text or keys. | Fixed error bodies; provider errors name the cause, never a key (SPEC-0002 B-0005, B-0007, B-0008). | mitigated |
 | T-06 | Info disclosure | A secret the model saw is returned to the client. | Configured secrets are replaced with `[redacted]` in answers, thread views and summaries (SPEC-0012 B-0003); `test_no_route_returns_a_secret` sweeps every route. | partly: `pending_action.input` and tool call records are not redacted (SPEC-0012 B-0003 leaves tool call records unchanged); [#69](https://github.com/darrenpaine/harnessd/issues/69) |
 | T-07 | Denial of service | A caller floods the API, or holds threads busy. | One run per thread (SPEC-0004 B-0005); run timeout (SPEC-0001 B-0006). No per-client request limit. | accepted: a per-client limit needs a caller identity, so it waits for authentication (SPEC-0013) |
-| T-08 | Denial of service | A caller runs up provider cost. | See LLM10. | partly |
+| T-08 | Denial of service | A caller runs up provider cost. | See LLM06:2026. | partly |
 | T-09 | Repudiation | No record of who did what. | Audit events for every run, tool result, confirmation, guard action and budget stop, with thread and request id (SPEC-0008 B-0007, SPEC-0012 B-0013, SPEC-0010 B-0006). They record what happened, not who: there is no caller identity. | partly |
 | T-10 | Info disclosure | `/docs`, `/redoc` and `/openapi.json` describe the whole API to anyone, and Swagger assets load from a CDN. | Intended for an example service; stays open under SPEC-0013 B-0001. | accepted |
 
@@ -98,11 +102,11 @@ Status values:
 | T-19 | Elevation (SSRF) | The model, steered by a user or a page, fetches an internal address: cloud metadata, Redis, Langfuse. | fetch_site rejects private, loopback and link-local addresses, also after each redirect; at most 3 redirects; http(s) only (SPEC-0003 B-0006). | mitigated |
 | T-20 | Elevation (SSRF) | DNS rebinding: the address is checked, then the HTTP client resolves the name again on connect and may get an internal one. | fetch_site connects to the address it checked, for the first request and each redirect, and never resolves the name again (SPEC-0003 B-0006; [#71](https://github.com/darrenpaine/harnessd/issues/71)). | mitigated |
 | T-21 | Denial of service | A huge or slow response ties up a run. | 10 s tool timeout, 1 MB body cap, text content only, 1000 chars returned (SPEC-0003 B-0002, B-0006). | mitigated |
-| T-22 | Info disclosure | The model puts thread contents or a secret into a URL or search query, sending it to an outside server. | See LLM02 (b). | accepted for now |
+| T-22 | Info disclosure | The model puts thread contents or a secret into a URL or search query, sending it to an outside server. | See LLM02:2026 (b). | accepted for now |
 
 ### TB5: Tool results → model
 
-Covered under LLM01 below; it is the main threat to this service.
+Covered under LLM01:2026 below; it is the main threat to this service.
 
 ### TB6: Agent → notes file
 
@@ -131,20 +135,65 @@ Covered under LLM01 below; it is the main threat to this service.
 | T-33 | Info disclosure | A secret is committed. | `.env` is gitignored; tests clear secret environment variables. gitleaks scans staged changes in a pre-commit hook and pushed commits in CI ([#70](https://github.com/darrenpaine/harnessd/issues/70)); findings that are not secrets are listed in `.gitleaksignore`. | mitigated for known key formats: the hook runs only where `make pre-commit-setup` was run, so a secret can reach a pushed branch before CI flags it |
 | T-34 | Tampering | An override of a private method of `langgraph-checkpoint-redis` could change behavior silently on an upgrade. | The override is gone: the library fixed the underlying bug in 0.6.0, and the app uses its checkpointer as published. SPEC-0004 AT-0006 is the regression test. | mitigated |
 
-## OWASP Top 10 for LLM Applications (2025)
+## OWASP Top 10 for LLM Applications 2026
 
 | Id | Risk | How it applies here | Mitigation | Status |
 |----|------|---------------------|------------|--------|
-| LLM01 | Prompt injection | Indirect: a fetched page or search result tells the agent to do something. Direct injection by the user is out of scope, as the user is the principal. | Layers: results reach the model only as tool messages, and the system prompt calls them untrusted (SPEC-0012 B-0002); invisible characters and hidden HTML are removed (B-0015, B-0016); results are capped (B-0001); an optional injection screen withholds flagged results (B-0005, B-0006). What an injection can *do* is bounded by LLM06. | partly: the screen is off unless `INJECTION_SCREEN` is set, it is probabilistic, and `INJECTION_SCREEN_ON_ERROR=allow` passes results when it fails |
-| LLM02 | Sensitive information disclosure | (a) A secret appears in an answer. (b) An injected page makes the agent send thread contents out through a fetch_site URL or a web_search query. (c) Thread contents reach traces or the provider. | (a) Redaction (SPEC-0012 B-0003; T-06). (b) No egress control: read-only tools run without confirmation, so a GET to an attacker's URL is not stopped. Configured secrets are not in the model's context, which limits what can leak to thread contents. (c) T-16, T-28. | (a) partly, (b) accepted for now: stopping it needs an allow-list of hosts or a confirmation for every fetch, which would defeat the tool in a single-operator example; reopen when the service is exposed, (c) accepted / partly |
-| LLM03 | Supply chain | Python dependencies, the base image, hosted models, and local models pulled through Ollama. | T-31. Models are named in settings by the operator. | partly |
-| LLM04 | Data and model poisoning | No training or fine-tuning. A poisoned page can enter a thread and, through compaction, its summary, which later runs receive in the system prompt (SPEC-0009 B-0005). | Results are screened and stripped before they enter the thread (LLM01). The summary is not screened. | partly |
-| LLM05 | Improper output handling | Model output is returned as JSON and written to a text file. It is never executed, rendered as HTML by the service, or used to build a query or a shell command. | Responses validate against `AgentResponse` (SPEC-0002 B-0002); tool arguments against Input models (SPEC-0003 B-0001). A client that renders an answer as HTML must escape it. | mitigated in the service |
-| LLM06 | Excessive agency | The agent has three tools; one has a side effect. | Narrow tools; the only side effect needs a human decision each time (SPEC-0001 B-0005); tool calls per run are capped in code (B-0002); a run has a timeout (B-0006). Read-only tools need no confirmation, which is what leaves LLM02 (b) open. | mitigated for side effects |
-| LLM07 | System prompt leakage | The system prompt can be extracted by asking. | It holds no secret and no access rule; it is in the repository (`src/prompts/`). Controls are in code, not the prompt. | accepted |
-| LLM08 | Vector and embedding weaknesses | No retrieval store or embeddings. | n/a | n/a |
-| LLM09 | Misinformation | The agent may state wrong facts or misreport a source. | `tool_calls` in every response shows what was actually fetched. Answer quality is measured in evals (SPEC-0011), not enforced. | accepted |
-| LLM10 | Unbounded consumption | A caller, or a loop the model falls into, runs up tokens and cost. | Tool-call cap and run timeout (SPEC-0001 B-0002, B-0006); run and thread token budgets (SPEC-0012 B-0009, B-0014); optional daily cost limit (B-0010, B-0011); provider call pacing (SPEC-0001 B-0008). | partly: the daily limit is off unless set; pacing is per process; concurrent runs can each exceed the limit by one call; no per-client limit (T-07); history is bounded only by the thread budget and manual compaction |
+| LLM01:2026 | Prompt injection | Indirect: a fetched page or search result tells the agent to do something. Direct injection by the user is out of scope, as the user is the principal. Inputs are text only: fetch_site keeps text content types, so there is no image or audio channel. | Layers: results reach the model only as tool messages, and the system prompt calls them untrusted (SPEC-0012 B-0002); invisible characters and hidden HTML are removed (B-0015, B-0016); results are capped (B-0001); an optional injection screen withholds flagged results (B-0005, B-0006). What an injection can *do* is bounded by LLM03:2026. | partly: the screen is off unless `INJECTION_SCREEN` is set, it is probabilistic, and `INJECTION_SCREEN_ON_ERROR=allow` passes results when it fails |
+| LLM02:2026 | Sensitive information disclosure | (a) A secret appears in an answer. (b) An injected page makes the agent send thread contents out through a fetch_site URL or a web_search query. (c) Thread contents reach traces or the provider. | (a) Redaction (SPEC-0012 B-0003; T-06). (b) No egress control: read-only tools run without confirmation, so a GET to an attacker's URL is not stopped. Configured secrets are not in the model's context, which limits what can leak to thread contents. (c) T-16, T-28. | (a) partly, (b) accepted for now: stopping it needs an allow-list of hosts or a confirmation for every fetch, which would defeat the tool in a single-operator example; reopen when the service is exposed, (c) accepted / partly |
+| LLM03:2026 | Excessive agency | The agent has three tools; one has a side effect. | Narrow tools; the only side effect needs a human decision each time (SPEC-0001 B-0005); tool calls per run are capped in code (B-0002); a run has a timeout (B-0006). Read-only tools need no confirmation, which is what leaves LLM02:2026 (b) open. | mitigated for side effects |
+| LLM04:2026 | Supply chain | Python dependencies, the base image, hosted models, and local models pulled through Ollama. | T-31. Models are named in settings by the operator. An Ollama model is named by tag, not digest, so the model behind a tag can change when it is pulled again. | partly |
+| LLM05:2026 | Data and model poisoning | No training or fine-tuning. A poisoned page can enter a thread and, through compaction, its summary, which later runs receive in the system prompt (SPEC-0009 B-0005). | Results are screened and stripped before they enter the thread (LLM01:2026). The summary is not screened. | partly |
+| LLM06:2026 | Unbounded consumption | A caller, or a loop the model falls into, runs up tokens and cost. Model cloning does not apply: the service hosts no model of its own. | Tool-call cap and run timeout (SPEC-0001 B-0002, B-0006); run and thread token budgets (SPEC-0012 B-0009, B-0014); optional daily cost limit (B-0010, B-0011); provider call pacing (SPEC-0001 B-0008). | partly: the daily limit is off unless set; pacing is per process; concurrent runs can each exceed the limit by one call; no per-client limit (T-07); history is bounded only by the thread budget and manual compaction |
+| LLM07:2026 | Misinformation | The agent may state wrong facts or misreport a source. The only action it can take on a wrong belief is add_note, which a human approves first. | `tool_calls` in every response shows what was actually fetched. Answer quality is measured in evals (SPEC-0011), not enforced. | accepted |
+| LLM08:2026 | Hidden context exposure | The hidden context is the system prompt, the tool schemas and a compacted thread's summary. It can be extracted by asking. | The system prompt and tool schemas hold no secret and no access rule, and are in the repository (`src/prompts/`, `src/tools/`); controls are in code, not the prompt. The summary is the user's own thread. | accepted |
+| LLM09:2026 | Vector and embedding weaknesses | No retrieval store, embeddings or semantic cache. | n/a | n/a |
+| LLM10:2026 | Improper output handling | Model output is returned as JSON and written to a text file. It is never executed, rendered as HTML by the service, or used to build a query or a shell command, and no generated code is run. | Responses validate against `AgentResponse` (SPEC-0002 B-0002); tool arguments against Input models (SPEC-0003 B-0001). A client that renders an answer as HTML must escape it. | mitigated in the service |
+
+## OWASP Top 10 for Agentic Applications 2026
+
+The agent is an actor: it chooses which tools to call and when, so these risks
+apply alongside the LLM list.
+
+**Capability composition (rule of two).** The agent holds all three legs of the
+lethal trifecta: private data (thread contents), untrusted content (fetched
+pages and search results), and external communication (fetch_site and
+web_search send requests to any public host). The side-effect part of the third
+leg, add_note, needs a human decision; the communication part does not. The
+residual risk is T-22 and LLM02:2026 (b), accepted by the operator while the
+service is local and single-operator. Removing a leg would need an egress
+allow-list or a confirmation for every fetch. Status: accepted; reopen when the
+service is exposed.
+
+| Id | Risk | How it applies here | Mitigation | Status |
+|----|------|---------------------|------------|--------|
+| ASI01:2026 | Agent goal hijack | A fetched page or search result redirects the run. | See LLM01:2026; what a hijacked run can do is bounded by LLM03:2026 and the run limits. | partly |
+| ASI02:2026 | Tool misuse and exploitation | A read-only tool carries thread contents out (T-22); fetch_site aimed at internal addresses (T-19, T-20); calls outside a tool's schema (T-17). | See those rows. | partly: T-22 accepted |
+| ASI03:2026 | Identity and privilege abuse | Tools act with the service's own Tavily key and network position, not the caller's; there is no caller identity. | Keys never enter the model's context (T-16, T-18); internal addresses are refused (T-19, T-20); the notes path comes from settings (T-24); the app runs unprivileged (T-32). | accepted (single operator); revisit with auth |
+| ASI04:2026 | Agentic supply chain vulnerabilities | Tools and prompts are code in this repository. No MCP servers, plugins or tool definitions are loaded at run time, so a definition cannot change after review. | T-31; prompt and tool changes are reviewed like code. | partly (T-31) |
+| ASI05:2026 | Unexpected code execution | No tool runs code, a shell or a query; model output is never executed (LLM10:2026). | By design. | n/a |
+| ASI06:2026 | Memory and context poisoning | Memory is per thread: its history and compaction summary, kept for `CHECKPOINT_TTL_HOURS`. Nothing carries across threads. | See LLM05:2026. | partly: the summary is not screened |
+| ASI07:2026 | Insecure inter-agent communication | One agent; it talks to no other agent. The optional injection screen is a classifier whose output is a typed verdict, not an agent. | n/a | n/a |
+| ASI08:2026 | Cascading failures | A bad tool call or a failed tool feeds later turns. | Tool failures return structured errors, never exceptions (SPEC-0003 B-0001); two invalid turns in a row end the run (SPEC-0001 B-0004); tool-call cap, timeout and token budgets (SPEC-0001 B-0002, B-0006; SPEC-0012 B-0009). | partly: a well-formed hostile result is limited only by LLM01:2026 |
+| ASI09:2026 | Human-agent trust exploitation | The model words its answer to get an add_note approved, or asks again after a rejection. | The pending action shows the exact tool and input that will run, and the decision applies to that call only (SPEC-0001 B-0005). Each add_note needs its own decision, and tool calls per run are capped. | mitigated for what the approver sees; [#69](https://github.com/darrenpaine/harnessd/issues/69) would change it |
+| ASI10:2026 | Rogue agents | A run keeps acting outside its limits or unseen. | A run exists only inside a request, with a timeout (SPEC-0001 B-0006), a tool-call cap (B-0002) and budgets (SPEC-0012 B-0009); there is no background work. Runs, tool results and confirmations are audited (SPEC-0012 B-0013) and traced (SPEC-0010 B-0002). A thread can be deleted (SPEC-0009 B-0002). | mitigated |
+
+## OWASP GenAI Data Security 2026 (selected)
+
+Chosen because the service holds conversations, keys and telemetry. Skipped:
+DSGAI11:2026 (one operator, so no context shared between users; see T-02),
+DSGAI06:2026 (the only data sent to tools is URLs and queries, LLM02:2026 (b)),
+and the risks for training, synthetic data, multimodal input, vector stores,
+generated queries, browser assistants, labellers and hosted models, none of which
+the service has.
+
+| Id | Risk | How it applies here | Mitigation | Status |
+|----|------|---------------------|------------|--------|
+| DSGAI01:2026 | Sensitive data leakage | Secrets or personal data in a thread reach a client, a tool or the provider. | See LLM02:2026 and T-06. | partly; [#69](https://github.com/darrenpaine/harnessd/issues/69) |
+| DSGAI02:2026 | Agent identity and credential exposure | Provider, Tavily and Langfuse keys are held by the app on the agent's behalf. | Never put in a prompt (T-16); never in errors, logs or spans (T-18); not committed (T-33). | mitigated |
+| DSGAI07:2026 | Data governance and lifecycle | Threads, summaries, notes, logs and traces each keep data. | Threads expire after `CHECKPOINT_TTL_HOURS` and can be deleted (SPEC-0004 B-0003, SPEC-0009 B-0002). The notes file and traces have no retention set by the service. | accepted: the notes file is the operator's own record, and trace retention is set in the tracing backend |
+| DSGAI14:2026 | Excessive telemetry leakage | Prompts, replies and tool I/O in logs and traces. | See T-27 and T-28. | accepted (T-28) |
+| DSGAI15:2026 | Over-broad context | Every turn sends the whole thread history, including fetched text, to the provider. | Tool results are capped (SPEC-0003 B-0006, SPEC-0012 B-0001); history is bounded by the thread token budget (SPEC-0012 B-0014) and manual compaction (SPEC-0009 B-0005); settings secrets never enter a prompt. | partly: no automatic history bound |
 
 ## Open items
 
@@ -160,10 +209,27 @@ reason.
 
 - Authentication is added (SPEC-0013): T-01, T-02, T-03, T-09 change from accepted
   to needing per-caller thread ownership.
-- A tool is added: add its boundary, and check LLM02 and LLM06 for it. A second
+- A tool is added: add its boundary, and check LLM02:2026, LLM03:2026 and the capability
+  composition for it. A second
   side-effecting tool, or one that takes longer than the run timeout, reopens T-25.
 - Development and testing end, or traces go to a backend the operator does not
   run: T-28 (set `TRACE_CONTENT=false` by default, or redact span content).
 - The service is exposed beyond its operator: every "accepted (single operator)"
-  row is reopened, and so are T-22 and LLM02 (b).
-- A retrieval store or memory across threads is added: LLM04 and LLM08.
+  row is reopened, and so are T-22, LLM02:2026 (b), the capability composition,
+  ASI03:2026 and DSGAI11:2026.
+- A retrieval store or memory across threads is added: LLM05:2026, LLM09:2026,
+  ASI06:2026, DSGAI11:2026 and DSGAI13:2026.
+- `pending_action.input` is redacted ([#69](https://github.com/darrenpaine/harnessd/issues/69)): ASI09:2026, as the
+  approver would no longer see exactly what will be written.
+
+## Sources
+
+The OWASP risk ids and names above are from the OWASP GenAI Security Project
+(genai.owasp.org), licensed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). How each
+applies here, and the mitigations, are this project's own.
+
+- *OWASP Top 10 for LLM Applications 2026*, version 2026 v1.0.
+- *OWASP Top 10 for Agentic Applications 2026*, and *Securing Agentic
+  Applications V2* for the capability-composition rule.
+- *OWASP GenAI Data Security Risks and Mitigations 2026* v1.0.
