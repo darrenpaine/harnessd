@@ -18,3 +18,4 @@ SPEC-0006.
 | SPEC-0011 | Evals | reviewed | [0011-evals.md](0011-evals.md) |
 | SPEC-0012 | Guardrails and human oversight | implemented | [0012-guardrails.md](0012-guardrails.md) |
 | SPEC-0013 | Deployment | reviewed | [0013-deployment.md](0013-deployment.md) |
+| SPEC-0014 | Redis resilience | reviewed | [0014-redis-resilience.md](0014-redis-resilience.md) |

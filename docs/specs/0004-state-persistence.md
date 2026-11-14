@@ -19,7 +19,8 @@ concurrent runs on one thread are prevented.
 ## Behavior
 - B-0001: State is checkpointed in Redis after each graph step. A request with an
   existing thread_id continues that thread.
-- B-0002: An unknown or expired thread_id starts a new thread with that id.
+- B-0002: An unknown or expired thread_id starts a new thread with that id. With
+  `API_KEY` set, it is refused instead (SPEC-0013 B-0003).
 - B-0003: Checkpoints expire `CHECKPOINT_TTL_HOURS` after the thread's last write;
   each run resets the clock.
 - B-0004: A pending confirmation (SPEC-0001 B-0005) is part of the checkpoint, so it

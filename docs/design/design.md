@@ -298,8 +298,8 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 - **Security threats** are recorded in [threat-model.md](../threat-model.md), with
   their mitigations and what is still open (e.g. DNS rebinding in fetch_site, T-20).
 - **TTL refresh cost**: `SCAN` over the keyspace per run is fine at this scale but
-  grows with all of Redis. Planned fix: renew only the thread's keys through the
-  checkpointer's own per-thread index ([#14](https://github.com/darrenpaine/harnessd/issues/14)).
+  grows with all of Redis. Planned fix: renew only the thread's keys, found
+  without a `SCAN` (SPEC-0014 B-0004, [#14](https://github.com/darrenpaine/harnessd/issues/14)).
 - **add_note after timeout**: the file write runs in a worker thread that a timeout
   can't stop, so a note may be written even though the tool reported `timeout`.
   If the model then asks again, the user sees a second confirmation and may approve
