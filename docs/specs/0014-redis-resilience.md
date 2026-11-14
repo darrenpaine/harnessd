@@ -1,6 +1,6 @@
 # SPEC-0014: Redis resilience
 
-Status: draft
+Status: reviewed
 Requirements: R-0006, R-0013, R-0026
 Design: [design.md](../design/design.md)
 
