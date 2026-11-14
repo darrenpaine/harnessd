@@ -581,7 +581,7 @@ async def test_services_wire_the_screen(
         built["screen"] = screen
         return "graph"
 
-    monkeypatch.setattr(api.deps, "open_checkpointer", lambda _: Memory())
+    monkeypatch.setattr(api.deps, "open_checkpointer", lambda *_: Memory())
     monkeypatch.setattr(api.deps, "build_graph", fake_build)
     settings = _screen_settings(
         injection_screen="ollama-systemone",

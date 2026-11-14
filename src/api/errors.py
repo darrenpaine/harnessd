@@ -23,7 +23,7 @@ from ollama import ResponseError as OllamaResponseError
 from redisvl.exceptions import RedisSearchError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from agent.persistence import REDIS_ERRORS, ThreadBusyError
+from agent.persistence import REDIS_ERRORS, ThreadBusyError, is_redis_error
 from agent.spend import DailyLimitError
 from agent.threads import (
     SummaryError,
@@ -141,16 +141,16 @@ def _unavailable(cause: str) -> JSONResponse:
 
 
 async def redis_unavailable(request: Request, exc: Exception) -> JSONResponse:
+    services = getattr(request.app.state, "services", None)
+    if services is not None:
+        services.redis_failed()  # SPEC-0014 B-0003
     return _unavailable("Redis is unreachable")
 
 
 async def wrapped_redis_error(request: Request, exc: Exception) -> JSONResponse:
     """The checkpointer's search layer wraps connection errors; unwrap them."""
-    cause: BaseException | None = exc
-    while cause is not None:
-        if isinstance(cause, REDIS_ERRORS):
-            return await redis_unavailable(request, exc)
-        cause = cause.__cause__ or cause.__context__
+    if is_redis_error(exc):
+        return await redis_unavailable(request, exc)
     raise exc
 
 

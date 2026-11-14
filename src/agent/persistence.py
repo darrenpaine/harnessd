@@ -1,17 +1,24 @@
-"""Redis checkpointing, checkpoint TTL and the per-thread run lock (SPEC-0004)."""
+"""Redis checkpointing, checkpoint TTL and the per-thread run lock (SPEC-0004),
+over one bounded, health-checked Redis client with retries for idempotent
+operations (SPEC-0014)."""
 
+import asyncio
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
 import redis.exceptions
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.redis.ashallow import AsyncShallowRedisSaver
 from langgraph.checkpoint.redis.base import CHECKPOINT_PREFIX, CHECKPOINT_WRITE_PREFIX
 from langgraph.checkpoint.redis.util import to_storage_safe_id, to_storage_safe_str
-from redis.asyncio import Redis
+from redis.asyncio import BlockingConnectionPool, Redis
+from redis.backoff import ExponentialWithJitterBackoff
 from redis.commands.search.query import Query
 from redis.exceptions import LockError
+from redis.maint_notifications import MaintNotificationsConfig
 
 from settings import Settings
 
@@ -19,6 +26,61 @@ LOCK_MARGIN_SECONDS = 30
 
 # Redis is unreachable or too slow; the API answers 503 (SPEC-0002 B-0005).
 REDIS_ERRORS = (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError)
+# The name our connections carry in CLIENT LIST.
+CLIENT_NAME = "harnessd"
+# Retry delays grow from BACKOFF_BASE, with jitter, up to BACKOFF_CAP seconds.
+BACKOFF_BASE = 0.1
+BACKOFF_CAP = 2.0
+
+
+def is_redis_error(exc: BaseException) -> bool:
+    """A connection or timeout error, or one wrapped by the checkpointer's
+    search layer."""
+    cause: BaseException | None = exc
+    while cause is not None:
+        if isinstance(cause, REDIS_ERRORS):
+            return True
+        cause = cause.__cause__ or cause.__context__
+    return False
+
+
+def build_redis(settings: Settings) -> Redis:
+    """The process's one Redis client (SPEC-0014 B-0001): connect and read
+    timeouts, a health check before reusing a connection idle longer than
+    `REDIS_HEALTH_CHECK_SECONDS`, TCP keepalive, and a pool capped at
+    `REDIS_MAX_CONNECTIONS` that waits for a free connection. It retries
+    nothing itself: only idempotent operations are retried, by `retrying`."""
+    pool = BlockingConnectionPool.from_url(
+        settings.redis_url,
+        max_connections=settings.redis_max_connections,
+        timeout=settings.redis_socket_timeout_seconds,
+        socket_timeout=settings.redis_socket_timeout_seconds,
+        socket_connect_timeout=settings.redis_socket_timeout_seconds,
+        socket_keepalive=True,
+        health_check_interval=settings.redis_health_check_seconds,
+        client_name=CLIENT_NAME,
+        # When enabled, even as "auto" without RESP3, the pool skips its check
+        # that a connection it hands out is still open, so one the server
+        # closed between requests would fail the next command.
+        maint_notifications_config=MaintNotificationsConfig(enabled=False),
+    )
+    return Redis.from_pool(pool)
+
+
+async def retrying[T](settings: Settings, operation: Callable[[], Awaitable[T]]) -> T:
+    """Run an idempotent Redis operation, retrying it up to `REDIS_RETRIES`
+    times with exponential backoff and jitter on connection and timeout errors
+    (SPEC-0014 B-0002). The last error is raised, for the API's 503."""
+    backoff = ExponentialWithJitterBackoff(cap=BACKOFF_CAP, base=BACKOFF_BASE)
+    failures = 0
+    while True:
+        try:
+            return await operation()
+        except Exception as exc:
+            if not is_redis_error(exc) or failures >= settings.redis_retries:
+                raise
+            failures += 1
+            await asyncio.sleep(backoff.compute(failures))
 
 
 class ThreadBusyError(Exception):
@@ -50,18 +112,38 @@ def ttl_seconds(settings: Settings) -> int:
     return int(settings.checkpoint_ttl_hours * 3600)
 
 
+class RetryingSaver(AsyncShallowRedisSaver):
+    """The library's shallow checkpointer, with checkpoint reads retried
+    (SPEC-0014 B-0002). Writes are not retried."""
+
+    def __init__(self, redis: Redis, settings: Settings) -> None:
+        super().__init__(redis_client=redis, ttl=ttl_config(settings))
+        self.settings = settings
+
+    async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        read = super().aget_tuple
+        return await retrying(self.settings, lambda: read(config))
+
+
 @asynccontextmanager
 async def open_checkpointer(
-    settings: Settings,
+    settings: Settings, redis: Redis | None = None
 ) -> AsyncGenerator[AsyncShallowRedisSaver]:
     """Checkpointer keeping only each thread's latest state (SPEC-0004 B-0001).
     It loads only the pending writes of the latest checkpoint (B-0006), which
-    langgraph-checkpoint-redis does from 0.6.0."""
-    async with AsyncShallowRedisSaver.from_conn_string(
-        settings.redis_url, ttl=ttl_config(settings)
-    ) as saver:
-        await saver.asetup()
+    langgraph-checkpoint-redis does from 0.6.0.
+
+    It uses `redis`, the client the thread lock shares (SPEC-0014 B-0001), and
+    leaves it open; without one it builds its own and closes it on exit."""
+    own = redis is None
+    client = build_redis(settings) if redis is None else redis
+    try:
+        saver = RetryingSaver(client, settings)
+        await retrying(settings, saver.asetup)
         yield saver
+    finally:
+        if own:
+            await client.aclose()
 
 
 # The checkpointer's search indexes, one per kind of key it writes.
@@ -145,7 +227,7 @@ async def thread_lock(
         yield
     finally:
         try:
-            await lock.release()
+            await retrying(settings, lock.release)
         except LockError:
             pass  # already expired; nothing to release
 
@@ -161,7 +243,12 @@ class RedisThreadGuard:
         return thread_lock(self.redis, thread_id, self.settings)
 
     async def touch(self, thread_id: str) -> None:
-        await refresh_thread_ttl(self.redis, thread_id, ttl_seconds(self.settings))
+        seconds = ttl_seconds(self.settings)
+        await retrying(
+            self.settings, lambda: refresh_thread_ttl(self.redis, thread_id, seconds)
+        )
 
     async def expires_in(self, thread_id: str) -> int | None:
-        return await thread_expiry(self.redis, thread_id)
+        return await retrying(
+            self.settings, lambda: thread_expiry(self.redis, thread_id)
+        )
