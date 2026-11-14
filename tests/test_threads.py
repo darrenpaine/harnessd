@@ -74,8 +74,8 @@ async def redis(redis_url: str) -> AsyncGenerator[Redis]:
     await client.aclose()
 
 
-async def key_ttls(redis: Redis, thread_id: str) -> dict[bytes, int]:
-    return {k: await redis.pttl(k) async for k in checkpoint_keys(redis, thread_id)}
+async def key_ttls(redis: Redis, thread_id: str) -> dict[str, int]:
+    return {k: await redis.pttl(k) for k in await checkpoint_keys(redis, thread_id)}
 
 
 @pytest.mark.spec("SPEC-0009", "B-0001", "AT-0001")

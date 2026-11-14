@@ -77,7 +77,7 @@ yet written.
 | `src/schemas.py` | Pydantic models: AgentRequest/AgentResponse, ErrorInfo, PendingAction, ToolError, each tool's Input/Output, the tool-call trace, ThreadState, AgentThreadState (a thread's status, pending action, messages and summary as `AgentThreads` reports it) and the compaction request/response. | SPEC-0002, SPEC-0003, SPEC-0009 | built |
 | `src/settings.py` | One `Settings` class from env and `.env`; fails at startup if a hosted provider has no key, if the injection screen is on with no `INJECTION_SCREEN_MODEL`, or if `MAX_TOKENS_PER_RUN` is larger than `MAX_TOKENS_PER_THREAD`. `get_settings()` is cached for injection. | SPEC-0001, SPEC-0004, SPEC-0012 B-0005, B-0006, B-0009, B-0014 | built |
 | `src/agent/llm.py` | `build_chat_model()`: ChatOllama, ChatAnthropic, ChatGoogleGenerativeAI or ChatOpenAI from settings, no network calls. ChatOpenAI's base URL is pinned to OpenAI's API, so environment variables can't redirect it. With `LLM_REQUESTS_PER_MINUTE` set, each model gets its own `InMemoryRateLimiter` (evenly spaced calls, no burst), so calls wait instead of hitting a provider quota. | SPEC-0001 B-0001, B-0008 | built |
-| `src/agent/persistence.py` | `open_checkpointer()` (the library's shallow Redis checkpointer with TTL, which loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `refresh_thread_ttl()`, `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
+| `src/agent/persistence.py` | `open_checkpointer()` (the library's shallow Redis checkpointer with TTL, which loads only the latest checkpoint's pending writes, SPEC-0004 B-0006), `checkpoint_keys()` (a thread's keys from the checkpointer's `checkpoint` and `checkpoint_write` search indexes, plus its per-namespace `write_keys_zset` key; no `SCAN`, SPEC-0014 B-0004), `refresh_thread_ttl()` and `thread_expiry()` (one pipeline each), `thread_lock()` / `ThreadBusyError`, the `ThreadGuard` protocol (lock, TTL reset, time to expiry) the runner and thread service depend on, and `RedisThreadGuard`, which implements it. | SPEC-0004, SPEC-0009 B-0001 | built |
 | `src/tools/base.py` | Tool contract: `Tool` metadata, `ToolContext` (settings, HTTP transport, DNS resolver, and the network backend that opens fetch_site's connections when no transport is given), `ToolFailure`, `call_tool()`. `resolve_host` keeps the system's address order, so the first address is the one to connect to. | SPEC-0003 B-0001..B-0003, B-0006 | built |
 | `src/tools/pinned.py` | `PinnedTransport`: an httpx transport of our own around an `httpcore` connection pool, whose network backend connects to the address pinned for each host name and never resolves a name. The URL keeps the host name, so the `Host` header, TLS server name and certificate check are unchanged. httpx's own transport takes no network backend, and this avoids replacing a private attribute of it; `httpcore` is a direct dependency for that reason. With an explicit transport, httpx no longer uses proxy environment variables for fetch_site. | SPEC-0003 B-0006 | built |
 | `src/tools/{web_search,fetch_site,add_note}.py` | The three tools; registry in `src/tools/__init__.py`. web_search cuts snippets to 500 chars; fetch_site's text leaves out comments, scripts and styles, and elements hidden by the `hidden` attribute, `aria-hidden` or an inline `display:none` / `visibility:hidden`. fetch_site resolves each hop's host once, requires every address to be global, and connects to the first one only (no fallback to the others) through `PinnedTransport`, so a DNS answer that changes after the check is never used. | SPEC-0003 B-0005..B-0007, SPEC-0012 B-0001, B-0016 | built |
@@ -283,7 +283,9 @@ to every key containing the thread id (a UUID) after each run, except the lock k
   read LangGraph's snapshot layout, and a thread's status was worked out in five
   places. Trade-off: one more module between the runner and the graph.
 - Redis 8.2 with the shallow checkpointer and an explicit TTL refresh; a Redis lock
-  per thread. Trade-off: a `SCAN` per run and a dependency on Redis modules.
+  per thread. A thread's keys are found through the checkpointer's own search
+  indexes, never a keyspace `SCAN`. Trade-off: a dependency on Redis modules and on
+  the library's index names and key layout.
 - One module, `MeteredModel`, owns a model call's accounting: counting tokens,
   pricing, the day's spend and the daily cost limit. Before it, the graph, compaction
   and the chat screen each wrote invoke → count → price → add by hand, and the price
@@ -297,9 +299,11 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 ## Risks and open questions
 - **Security threats** are recorded in [threat-model.md](../threat-model.md), with
   their mitigations and what is still open (e.g. DNS rebinding in fetch_site, T-20).
-- **TTL refresh cost**: `SCAN` over the keyspace per run is fine at this scale but
-  grows with all of Redis. Planned fix: renew only the thread's keys, found
-  without a `SCAN` (SPEC-0014 B-0004, [#14](https://github.com/darrenpaine/harnessd/issues/14)).
+- **Checkpoint key layout**: the TTL refresh finds a thread's keys through the
+  checkpointer's search indexes and names its `write_keys_zset` key itself
+  (SPEC-0014 B-0004). A library upgrade that changes either would leave keys
+  unrefreshed; `tests/test_checkpoint.py::test_ttl_refresh_without_scan` compares
+  the keys found with every key of the thread, so it would fail.
 - **add_note after timeout**: the file write runs in a worker thread that a timeout
   can't stop, so a note may be written even though the tool reported `timeout`.
   If the model then asks again, the user sees a second confirmation and may approve
