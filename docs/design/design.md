@@ -4,7 +4,7 @@ Status: reviewed
 Specs: SPEC-0001 Agent core, SPEC-0002 API service, SPEC-0003 Tool contract,
 SPEC-0004 State and persistence, SPEC-0005 Test strategy, SPEC-0006 Traceability,
 SPEC-0007 API documentation, SPEC-0008 Logging, SPEC-0009 Thread management,
-SPEC-0010 Observability (see [the spec index](../specs/README.md))
+SPEC-0010 Observability, SPEC-0013 Deployment (see [the spec index](../specs/README.md))
 
 This document pulls together how the service is built and why. The specs are the
 contract; where this document and a spec disagree, the spec wins and this document
@@ -30,7 +30,9 @@ Constraints:
   where persistence is under test (SPEC-0005).
 - **Spec-first and traceable**: behavior is specified before it is coded, and tests
   name the spec behaviors they prove (SPEC-0006).
-- **Non-goals**: auth, streaming, multi-agent routing, a UI, production deployment.
+- **Non-goals**: per-user auth, streaming, multi-agent routing, a UI, production
+  deployment. The cloud demo (SPEC-0013) has one shared API key and is not
+  production.
 
 ## Proposed approach
 Starting with a basic version, develop and update the CLAUDE.md and other associated
@@ -259,6 +261,25 @@ to every key containing the thread id (a UUID) after each run, except the lock k
 | Summary call times out or returns no text | 500 `internal`, `thread.compact_failed` warning, state unchanged (a provider error is a 503) | SPEC-0009 B-0008 |
 | Trace backend down or slow | Requests unaffected (export runs on the batch processor's thread); `trace.export_failed` warning at most once a minute | SPEC-0010 B-0005 |
 | Redis lacks the JSON/search modules | `redis` tests skip locally / fail in CI with a clear reason | SPEC-0005 B-0003 |
+
+### Cloud demo (SPEC-0013, planned)
+The same app runs on AWS Lambda from a container image, behind a public Function
+URL, with a free Redis Cloud database in the same region. Nothing in the agent
+changes; the differences are at the edges.
+
+| Part | What it is | Why |
+|------|------------|-----|
+| `lambda` Docker target | The default image plus the Lambda Web Adapter and the Parameters and Secrets extension in `/opt/extensions`. | Lambda calls uvicorn through the adapter; layers can't be attached to an image function. Compose keeps the default target. |
+| API key | A dependency on the `/v1/*` routers compares `X-API-Key` in constant time before any Redis or model call; with a key set, an unknown thread id is refused. | The URL is public; ids must not be chosen or guessed (SPEC-0013 B-0001, B-0003). |
+| Settings | With `SSM_PARAMETER_PATH` set, a settings source reads the secrets from the extension over localhost HTTP, below environment variables; startup then also requires `API_KEY` and `DAILY_COST_LIMIT_USD`. | No AWS SDK in the app, and a misconfigured stack fails to start (B-0005, B-0009, B-0010). |
+| Notes | `NOTES_BACKEND=redis` appends to a capped Redis list on the shared client. | Lambda's disk is temporary (B-0004). |
+| `infra/bootstrap` | State bucket, GitHub OIDC provider, one deploy role, the ECR repository. Applied once by the operator. | The image must exist before the Lambda can be created. |
+| `infra/app` | Lambda, Function URL, IAM role, log group, `REDIS_URL` parameter, budget, kill switch, Redis Cloud database. Applied by `deploy.yml`. | One apply builds or removes everything that runs (B-0006). |
+| Kill switch | A CloudWatch alarm on invocations → SNS → a small Lambda that sets the app's reserved concurrency to 0. | A request without the key is still billed; budgets only send email, a day late (B-0011). |
+
+Trade-offs taken: no TLS and no persistence to Redis on the free plan; one
+Lambda instance and paced model calls while the model key is on a free tier; no
+automatic rollback. Each is in SPEC-0013 with its reason.
 
 ## Alternatives considered
 | Option | Pros | Cons | Why not |
