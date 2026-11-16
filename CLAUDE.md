@@ -73,6 +73,7 @@ docs/
   design/          # how it is built: components, data flow, trade-offs
   requirements/    # what the system must do (R-nnnn statements)
   specs/           # per-feature contract: goal, I/O, behavior, acceptance 
+infra/             # Terraform: bootstrap/ (once, by hand) and app/ (SPEC-0013)
 tests/
 Dockerfile
 docker-compose.yml
@@ -94,4 +95,5 @@ uv.lock            # UV sync file
 - Ask me before adding dependencies.
 
 ## Non-goals (for now)
-Auth, streaming, multi-agent routing, a UI, production deployment.
+Per-user auth (R-0018), streaming, multi-agent routing, a UI, production deployment
+(SPEC-0013 is a cloud demo behind one shared API key).

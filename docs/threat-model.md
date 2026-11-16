@@ -74,7 +74,8 @@ Status values:
 | T-04 | Tampering | Malformed or oversized input reaches the model or a tool. | Pydantic validation at the boundary; message ≤ 4000 chars, `max_tool_calls` 1..20 (SPEC-0002 B-0001, SPEC-0012 B-0001). | mitigated |
 | T-05 | Info disclosure | Errors leak stack traces, exception text or keys. | Fixed error bodies; provider errors name the cause, never a key (SPEC-0002 B-0005, B-0007, B-0008). | mitigated |
 | T-06 | Info disclosure | A secret the model saw is returned to the client. | Configured secrets are replaced with `[redacted]` in answers, thread views and summaries (SPEC-0012 B-0003); `test_no_route_returns_a_secret` sweeps every route. | partly: `pending_action.input` and tool call records are not redacted (SPEC-0012 B-0003 leaves tool call records unchanged); [#69](https://github.com/darrenpaine/harnessd/issues/69) |
-| T-07 | Denial of service | A caller floods the API, or holds threads busy. | One run per thread (SPEC-0004 B-0005); run timeout (SPEC-0001 B-0006). No per-client request limit. In the cloud, the Lambda's reserved concurrency caps parallel runs at 5 (SPEC-0013). | accepted: a per-client limit needs a caller identity, so it waits for per-user identity (R-0018) |
+| T-07 | Denial of service | A caller floods the API, or holds threads busy. | One run per thread (SPEC-0004 B-0005); run timeout (SPEC-0001 B-0006). No per-client request limit. In the cloud, the Lambda's reserved concurrency caps parallel runs at 5 (SPEC-0013), and T-36 covers the cost of a flood. | accepted: a per-client limit needs a caller identity, so it waits for per-user identity (R-0018) |
+| T-36 | Denial of service | In the cloud, the Function URL is public, and a request without the key still invokes the Lambda and is billed. A flood runs up cost, and AWS Budgets only emails, up to a day late. | A CloudWatch alarm on invocations (2,000 an hour by default) sets the function's reserved concurrency to 0 and emails the operator; throttled requests are not billed (SPEC-0013 B-0011). The AWS budget alerts remain. | planned: the service is then down for everyone until the operator re-runs the deploy, so a flood becomes an outage instead of a bill |
 | T-08 | Denial of service | A caller runs up provider cost. | See LLM06:2026. | partly |
 | T-09 | Repudiation | No record of who did what. | Audit events for every run, tool result, confirmation, guard action and budget stop, with thread and request id (SPEC-0008 B-0007, SPEC-0012 B-0013, SPEC-0010 B-0006). They record what happened, not who: there is no caller identity. | partly |
 | T-10 | Info disclosure | `/docs`, `/redoc` and `/openapi.json` describe the whole API to anyone, and Swagger assets load from a CDN. | Intended for an example service; stays open under SPEC-0013 B-0001. | accepted |
@@ -89,6 +90,7 @@ Status values:
 | T-14 | Denial of service | Redis is down, slow, or its keyspace is large. | 503 with no stack trace (SPEC-0002 B-0005). Idempotent operations are retried with backoff, stale connections are replaced, a broken checkpointer is rebuilt at most once per health-check interval, and the pool is capped (SPEC-0014 B-0001..B-0003). The TTL refresh finds a thread's keys through the checkpointer's indexes, not a keyspace scan (B-0004). | mitigated for drops and stale connections; a Redis outage still gives 503 |
 | T-15 | Elevation | Two runs on one thread at once corrupt its state or repeat a side effect. | Redis lock per thread, expiring after the run timeout + 30 s (SPEC-0004 B-0005). | mitigated |
 | T-35 | Denial of service | In the cloud, the free Redis database is deleted after 14 days with no commands, with every thread and note in it. | Keeping it in use is the operator's job, outside this repository (SPEC-0013). | accepted: demo data only |
+| T-37 | Denial of service, Tampering | In the cloud, the free Redis database has no persistence. A restart by Redis Cloud loses every thread, pending confirmation and note, and the day's spend, so the daily cost limit starts again from zero that day. | None in the app. The provider console's own spend limit still applies (SPEC-0013). | accepted: demo data only; the paid plan with persistence is the upgrade path |
 
 ### TB3: Agent → model provider
 
@@ -97,6 +99,7 @@ Status values:
 | T-16 | Info disclosure | Everything in a thread, including fetched pages and anything the user pasted, is sent to a third-party provider. | The operator chooses the provider; Ollama keeps it local. Prompts are built in one function (`build_prompt`). Secrets from settings are never put in a prompt. | accepted (documented) |
 | T-17 | Spoofing, Tampering | A reply is malformed, or asks for a tool or arguments that do not exist. | Every tool call is validated against its Input model; an invalid turn is fed back once, then the run ends (SPEC-0001 B-0004, SPEC-0003 B-0001). | mitigated |
 | T-18 | Info disclosure | A provider key leaks through an error, a log or a span. | SPEC-0002 B-0007, SPEC-0008 B-0004, SPEC-0010 B-0004. | mitigated |
+| T-40 | Info disclosure | While the cloud demo uses a free-tier model key, the provider's free-tier terms may let it use prompts and replies to improve its products. | Key holders are told not to put anything sensitive in a thread (SPEC-0013). | accepted: demo data only; ends with a paid key |
 
 ### TB4: Tools → internet
 
@@ -137,6 +140,8 @@ Covered under LLM01:2026 below; it is the main threat to this service.
 | T-32 | Elevation | The container runs as root, so a code-execution bug has the whole container and its volumes. | The app runs as the unprivileged user `app` ([#67](https://github.com/darrenpaine/harnessd/issues/67)); it cannot change the app's code or installed packages, which root owns. | mitigated |
 | T-33 | Info disclosure | A secret is committed. | `.env` is gitignored; tests clear secret environment variables. gitleaks scans staged changes in a pre-commit hook and pushed commits in CI ([#70](https://github.com/darrenpaine/harnessd/issues/70)); findings that are not secrets are listed in `.gitleaksignore`. | mitigated for known key formats: the hook runs only where `make pre-commit-setup` was run, so a secret can reach a pushed branch before CI flags it |
 | T-34 | Tampering | An override of a private method of `langgraph-checkpoint-redis` could change behavior silently on an upgrade. | The override is gone: the library fixed the underlying bug in 0.6.0, and the app uses its checkpointer as published. SPEC-0004 AT-0006 is the regression test. | mitigated |
+| T-38 | Elevation | Someone other than the operator deploys to, or destroys, the cloud stack, or uses the deploy role for something else. | No AWS keys are stored. The deploy role can be assumed only through GitHub OIDC from this repository's `demo` environment, which needs the operator's approval for each run and allows only `main` and `v*` tags. There is no role a pull request can assume (SPEC-0013). | planned |
+| T-39 | Info disclosure | The Terraform state holds the Redis password, and GitHub holds the Redis Cloud API keys, which can delete the database. | The state bucket is encrypted and readable only by the deploy role and the operator. The API keys are secrets of the `demo` environment, so only an approved run sees them. Provider keys and the API key are never in the state: the operator puts them in SSM by hand (SPEC-0013). | planned |
 
 ## OWASP Top 10 for LLM Applications 2026
 
@@ -213,8 +218,9 @@ reason.
 
 - Per-user identity is added (R-0018): T-01, T-02, T-03, T-07, T-09 change from
   accepted to needing per-caller thread ownership and limits.
-- The cloud demo holds real data, or users outside the trusted key holders: T-11
-  and T-35 (the paid Redis plan with TLS, backups and no idle deletion).
+- The cloud demo holds real data, or users outside the trusted key holders: T-11,
+  T-35 and T-37 (the paid Redis plan with TLS, persistence and no idle deletion),
+  and T-40 (a paid model key).
 - A tool is added: add its boundary, and check LLM02:2026, LLM03:2026 and the capability
   composition for it. A second
   side-effecting tool, or one that takes longer than the run timeout, reopens T-25.
