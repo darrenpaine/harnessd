@@ -19,6 +19,7 @@ from agent.metered import MeteredModel
 from agent.persistence import ThreadGuard
 from agent.prices import MICRO_USD
 from agent.redact import Redactor
+from agent.threads import ThreadNotFoundError
 from logs import audit, elapsed_ms, log_context
 from schemas import AgentRequest, AgentResponse, ErrorInfo
 from settings import Settings
@@ -42,8 +43,9 @@ class AgentRunner:
         self.redactor = Redactor(settings)
 
     async def run(self, request: AgentRequest) -> AgentResponse:
-        """Run a request to its end. Raises DailyLimitError, ThreadBusyError and
-        ConfirmationStateError; dependency failures propagate."""
+        """Run a request to its end. Raises DailyLimitError, ThreadBusyError,
+        ConfirmationStateError and ThreadNotFoundError; dependency failures
+        propagate."""
         thread_id = request.thread_id or uuid4()
         with (
             log_context(thread=str(thread_id)),
@@ -87,6 +89,7 @@ class AgentRunner:
     async def _prepare(self, request: AgentRequest, thread_id: UUID) -> PreparedRun:
         """Check the confirmation rules, then log the start: a refused request
         logs nothing (SPEC-0008 B-0002)."""
+        await self._refuse_unknown(request, thread_id)
         if request.confirm is None:
             run = await self.threads.start(
                 thread_id, request.message or "", request.max_tool_calls
@@ -111,6 +114,14 @@ class AgentRunner:
             approved=request.confirm,
         )
         return run
+
+    async def _refuse_unknown(self, request: AgentRequest, thread_id: UUID) -> None:
+        """SPEC-0013 B-0003: with an API key set, a client can't choose a
+        thread's id, so a run on an id with no saved state is refused."""
+        if self.settings.api_key is None or request.thread_id is None:
+            return
+        if await self.threads.state(thread_id) is None:
+            raise ThreadNotFoundError(str(thread_id))
 
     async def _timed_out(self, thread_id: UUID) -> RunResult:
         """B-0006: report the calls made before the timeout and an error."""

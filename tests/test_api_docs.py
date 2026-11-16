@@ -25,12 +25,20 @@ OPERATIONS = {
 
 # SPEC-0009: each thread operation's responses, with the success body.
 THREAD_RESPONSES = {
-    ("get", "/v1/threads/{thread_id}"): ("200", "ThreadState", {"404", "422", "503"}),
-    ("delete", "/v1/threads/{thread_id}"): ("204", None, {"404", "409", "422", "503"}),
+    ("get", "/v1/threads/{thread_id}"): (
+        "200",
+        "ThreadState",
+        {"401", "404", "422", "503"},
+    ),
+    ("delete", "/v1/threads/{thread_id}"): (
+        "204",
+        None,
+        {"401", "404", "409", "422", "503"},
+    ),
     ("post", "/v1/threads/{thread_id}/compact"): (
         "200",
         "CompactResponse",
-        {"404", "409", "422", "429", "500", "503"},
+        {"401", "404", "409", "422", "429", "500", "503"},
     ),
 }
 
@@ -92,7 +100,9 @@ def test_operations_documented() -> None:
 def test_error_responses_documented() -> None:
     spec = schema()
     responses = spec["paths"]["/v1/agent/run"]["post"]["responses"]
-    assert set(responses) == {"200", "409", "422", "429", "500", "503"}
+    assert set(responses) == {"200", "401", "404", "409", "422", "429", "500", "503"}
+    assert ref_name(responses["401"]) == "ApiError"
+    assert ref_name(responses["404"]) == "ApiError"
     assert ref_name(responses["429"]) == "ApiError"
     assert ref_name(responses["200"]) == "AgentResponse"
     assert ref_name(responses["409"]) == "ApiError"

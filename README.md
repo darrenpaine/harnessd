@@ -124,6 +124,13 @@ For Ollama:
 `web_search` uses [Tavily](https://tavily.com). Set `TAVILY_API_KEY` in `.env`.
 Without it the agent still runs, but every search returns an error to the model.
 
+### API key
+By default the API needs no key, which is fine on your own machine. Set `API_KEY`
+in `.env` (make one with `openssl rand -hex 32`) and every `/v1/*` request must
+send it in the `X-API-Key` header, or it gets 401. `/health`, `/docs`, `/redoc`
+and `/openapi.json` stay open. With a key set, a run on an unknown `thread_id` gets
+404: omit `thread_id` to start a thread, and use the id the response returns.
+
 ### Logging
 `LOG_LEVEL` (`debug`, `info`, `warning`, `error`; default `info`) sets how much the
 server logs. At `info` each run logs its start and end, every graph step and every

@@ -7,11 +7,19 @@ from fastapi.exceptions import RequestValidationError
 
 from agent.agent_threads import ConfirmationStateError
 from agent.runner import AgentRunner
+from api.auth import require_api_key
 from api.deps import get_runner
-from api.errors import BUSY, SPENT, UNAVAILABLE, UNEXPECTED, error_responses
+from api.errors import (
+    BUSY,
+    SPENT,
+    UNAUTHORIZED,
+    UNAVAILABLE,
+    UNEXPECTED,
+    error_responses,
+)
 from schemas import REQUEST_EXAMPLES, AgentRequest, AgentResponse
 
-router = APIRouter(tags=["agent"])
+router = APIRouter(tags=["agent"], dependencies=[Depends(require_api_key)])
 
 
 @router.post(
@@ -25,6 +33,8 @@ router = APIRouter(tags=["agent"])
     ),
     responses=error_responses(
         {
+            401: UNAUTHORIZED,
+            404: "With an API key set: the `thread_id` is unknown or expired.",
             409: BUSY,
             429: SPENT,
             500: UNEXPECTED,

@@ -144,7 +144,7 @@
                 "type": "null"
               }
             ],
-            "description": "Thread to continue. Omit to start a new thread.",
+            "description": "Thread to continue. Omit to start a new thread. When the service requires an API key, an unknown id is refused.",
             "title": "Thread Id"
           }
         },
@@ -288,7 +288,7 @@
       },
       "ApiError": {
         "additionalProperties": false,
-        "description": "Body of a 404, 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004).",
+        "description": "Body of a 401, 404, 409, 429, 500 or 503 response (SPEC-0002, SPEC-0007\nB-0004).",
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ApiErrorDetail"
@@ -305,6 +305,7 @@
         "properties": {
           "code": {
             "enum": [
+              "unauthorized",
               "thread_busy",
               "thread_not_found",
               "thread_awaiting_confirmation",
@@ -891,6 +892,14 @@
         "title": "WebSearchResult",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "description": "Required on `/v1/*` when the service has `API_KEY` set.",
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -974,6 +983,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The `X-API-Key` header is missing or wrong."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "With an API key set: the `thread_id` is unknown or expired."
+          },
           "409": {
             "content": {
               "application/json": {
@@ -1025,6 +1054,11 @@
             "description": "Redis or the LLM provider is down, or the provider refused the request."
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Run the agent on a thread",
         "tags": [
           "agent"
@@ -1052,6 +1086,16 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The `X-API-Key` header is missing or wrong."
           },
           "404": {
             "content": {
@@ -1094,6 +1138,11 @@
             "description": "Redis or the LLM provider is down, or the provider refused the request."
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Delete a thread",
         "tags": [
           "threads"
@@ -1127,6 +1176,16 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The `X-API-Key` header is missing or wrong."
+          },
           "404": {
             "content": {
               "application/json": {
@@ -1158,6 +1217,11 @@
             "description": "Redis or the LLM provider is down, or the provider refused the request."
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Read a thread",
         "tags": [
           "threads"
@@ -1209,6 +1273,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "The `X-API-Key` header is missing or wrong."
           },
           "404": {
             "content": {
@@ -1271,6 +1345,11 @@
             "description": "Redis or the LLM provider is down, or the provider refused the request."
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Compact a thread",
         "tags": [
           "threads"

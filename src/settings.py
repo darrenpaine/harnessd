@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     max_tokens_per_thread: int = Field(default=200_000, gt=0)
     daily_cost_limit_usd: float | None = Field(default=None, gt=0)  # B-0010
 
+    # Access (SPEC-0013 B-0001): unset means no key is needed
+    api_key: SecretStr | None = None
+
     # Runtime
     redis_url: str = "redis://localhost:6379"
     run_timeout_seconds: float = Field(default=60, gt=0)  # SPEC-0001 B-0006

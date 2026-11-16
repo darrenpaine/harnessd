@@ -177,7 +177,8 @@ class AgentRequest(_Model):
 
     thread_id: UUID | None = Field(
         default=None,
-        description="Thread to continue. Omit to start a new thread.",
+        description="Thread to continue. Omit to start a new thread. When the "
+        "service requires an API key, an unknown id is refused.",
     )
     message: (
         Annotated[
@@ -395,6 +396,7 @@ class CompactResponse(_Model):
 
 
 ApiErrorCode = Literal[
+    "unauthorized",
     "thread_busy",
     "thread_not_found",
     "thread_awaiting_confirmation",
@@ -411,7 +413,8 @@ class ApiErrorDetail(_Model):
 
 
 class ApiError(_Model):
-    """Body of a 404, 409, 500 or 503 response (SPEC-0002, SPEC-0007 B-0004)."""
+    """Body of a 401, 404, 409, 429, 500 or 503 response (SPEC-0002, SPEC-0007
+    B-0004)."""
 
     error: ApiErrorDetail
 
