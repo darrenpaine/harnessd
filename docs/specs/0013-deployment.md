@@ -1,6 +1,6 @@
 # SPEC-0013: Deployment
 
-Status: draft
+Status: reviewed
 Requirements: R-0017
 Design: [design.md](../design/design.md)
 
