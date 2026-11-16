@@ -6,11 +6,21 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Path
 
 from agent.threads import ThreadService
+from api.auth import require_api_key
 from api.deps import get_threads
-from api.errors import BUSY, NOT_FOUND, SPENT, UNAVAILABLE, error_responses
+from api.errors import (
+    BUSY,
+    NOT_FOUND,
+    SPENT,
+    UNAUTHORIZED,
+    UNAVAILABLE,
+    error_responses,
+)
 from schemas import CompactRequest, CompactResponse, ThreadState
 
-router = APIRouter(prefix="/v1/threads", tags=["threads"])
+router = APIRouter(
+    prefix="/v1/threads", tags=["threads"], dependencies=[Depends(require_api_key)]
+)
 
 ThreadId = Annotated[UUID, Path(description="The thread's id.")]
 Threads = Annotated[ThreadService, Depends(get_threads)]
@@ -24,7 +34,7 @@ Threads = Annotated[ThreadService, Depends(get_threads)]
         "Return the thread's latest saved state: its messages, any summary, and "
         "the action awaiting confirmation. Does not reset the thread's expiry."
     ),
-    responses=error_responses({404: NOT_FOUND, 503: UNAVAILABLE}),
+    responses=error_responses({401: UNAUTHORIZED, 404: NOT_FOUND, 503: UNAVAILABLE}),
 )
 async def get_thread(thread_id: ThreadId, threads: Threads) -> ThreadState:
     return await threads.read(thread_id)
@@ -36,7 +46,9 @@ async def get_thread(thread_id: ThreadId, threads: Threads) -> ThreadState:
     operation_id="delete_thread",
     summary="Delete a thread",
     description="Remove the thread's saved state. A later run on the id starts anew.",
-    responses=error_responses({404: NOT_FOUND, 409: BUSY, 503: UNAVAILABLE}),
+    responses=error_responses(
+        {401: UNAUTHORIZED, 404: NOT_FOUND, 409: BUSY, 503: UNAVAILABLE}
+    ),
 )
 async def delete_thread(thread_id: ThreadId, threads: Threads) -> None:
     await threads.delete(thread_id)
@@ -52,6 +64,7 @@ async def delete_thread(thread_id: ThreadId, threads: Threads) -> None:
     ),
     responses=error_responses(
         {
+            401: UNAUTHORIZED,
             404: NOT_FOUND,
             409: "A run is in progress, the thread is awaiting confirmation, "
             "or its last run did not finish.",

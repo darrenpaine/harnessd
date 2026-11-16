@@ -31,6 +31,7 @@ from agent.threads import (
     ThreadNotFoundError,
     ThreadRunUnfinishedError,
 )
+from api.auth import UnauthorizedError
 from api.deps import app_settings
 from logs import event, get_logger
 from schemas import ApiError, ApiErrorCode, ApiErrorDetail
@@ -44,6 +45,7 @@ LLM_ERRORS = (httpx.TransportError, ModelConnectionError, ModelTimeoutError)
 PROVIDER_ERRORS = (ModelError, OllamaResponseError)
 
 UNEXPECTED = "An unexpected error."
+UNAUTHORIZED = "The `X-API-Key` header is missing or wrong."
 UNAVAILABLE = "Redis or the LLM provider is down, or the provider refused the request."
 BUSY = "A run is in progress on the thread."
 NOT_FOUND = "No such thread: unknown, expired or deleted."
@@ -89,6 +91,11 @@ def provider_rejection(exc: Exception, model: str) -> str:
     if isinstance(exc, ModelRateLimitError) or status == 429:
         return f"the LLM provider is rate-limiting requests for model {model!r}"
     return f"the LLM provider rejected the request for model {model!r}"
+
+
+async def unauthorized(request: Request, exc: Exception) -> JSONResponse:
+    """SPEC-0013 B-0001."""
+    return api_error(401, "unauthorized", "missing or wrong X-API-Key")
 
 
 async def thread_busy(request: Request, exc: Exception) -> JSONResponse:
@@ -164,6 +171,7 @@ async def provider_rejected(request: Request, exc: Exception) -> JSONResponse:
 
 
 def add_error_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(UnauthorizedError, unauthorized)
     app.add_exception_handler(ThreadBusyError, thread_busy)
     app.add_exception_handler(DailyLimitError, daily_limit_reached)
     app.add_exception_handler(ThreadNotFoundError, thread_not_found)
